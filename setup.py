@@ -1,4 +1,4 @@
-from distutils.core import setup
+from setuptools import setup
 
 setup(
     name='pydiffexp',
@@ -7,5 +7,10 @@ setup(
     license='GPL3',
     author='Justin Finkle',
     author_email='jfinkle@u.northwestern.edu',
-    description='Differential Expression Analysis in Python'
+    description='Differential Expression Analysis in Python',
+    install_requires=[
+        'rpy2',
+        'numpy',
+        'pandas',
+    ]
 )
