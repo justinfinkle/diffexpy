@@ -13,8 +13,8 @@ rpy2.robjects.numpy2ri.activate()
 def is_multiindex(df):
     """
     Function to determine if a dataframe is multiindex
-    :param df:
-    :return:
+    :param df: dataframe
+    :return: tuple
     """
     mi = [False, False]
     mi[0] = True if isinstance(df.index, pd.MultiIndex) else False
@@ -25,11 +25,11 @@ def is_multiindex(df):
 def make_hierarchical(df, index_names=None, axis=0, split_str='_'):
     """
     Make a regular dataframe hierarchical by adding a MultiIndex
-    :param df:
-    :param index_names:
-    :param axis:
-    :param split_str:
-    :return:
+    :param df: dataframe; the dataframe to made hierarchical
+    :param index_names: list; names for each of the categories of the multiindex
+    :param axis: int (0 or 1); axis along which to split the index into a multiindex. Default (0) splits along the dataframe index, while 1 splits along the dataframe columns
+    :param split_str: str; the string on which to split tuples
+    :return: dataframe; hierarchical dataframe with multiindex
     """
 
     hierarchical_df = df.copy()
@@ -39,15 +39,12 @@ def make_hierarchical(df, index_names=None, axis=0, split_str='_'):
     # Split each label into hierarchy
     formatted_index = [tuple(ind.split(split_str)) for ind in index]
     m_index = pd.MultiIndex.from_tuples(formatted_index, names=index_names)
-    hierarchical_df.columns = m_index
+
+    if axis == 0:
+        hierarchical_df.index = m_index
+    elif axis == 1:
+        hierarchical_df.columns = m_index
     return hierarchical_df
-
-
-def make_sample_ids(summary, id_ref=('condition', 'time')):
-    combos = ['_'.join(combo) for combo in summary.loc[:, id_ref].values.tolist()]
-    combo_set = sorted(list(set(combos)))
-    ids = [combo_set.index(combo) for combo in combos]
-    return ids, combos
 
 
 def keep_genes(pearson_df, metric='Mean_pearson', threshold=0.5):
@@ -120,7 +117,7 @@ class DEAnalysis(object):
 
         # Confirm that data is multiindex
         self.multiindex = is_multiindex(self.raw_data)
-        if not self.multiindex[1]:
+        if not self.multiindex[1] and not self.multiindex[0]:
             raise ValueError("The columns of the dataframe must have a multiindex")
 
         # Import requisite R packages
@@ -137,14 +134,27 @@ class DEAnalysis(object):
         for ii, name in enumerate(index.names):
             summary_df[name] = index.levels[ii].values[index.labels[ii]]
         if include_id:
-            summary_df['sample_id'], self.sample_labels = make_sample_ids(summary_df)
+            summary_df['sample_id'], self.sample_labels = self.make_sample_ids(summary_df)
         return summary_df
+
+    @staticmethod
+    def make_sample_ids(summary, id_ref=('condition', 'time')):
+        """
+        Make unique sample ID combinations.
+        :param summary: dataframe; summary of experiments and samples. See get_experiment summary
+        :param id_ref:
+        :return:
+        """
+        combos = ['_'.join(combo) for combo in summary.loc[:, id_ref].values.tolist()]
+        combo_set = sorted(list(set(combos)))
+        ids = [combo_set.index(combo) for combo in combos]
+        return ids, combos
 
     def print_experiment_summary(self, verbose=False):
         """
         Print a summary of the experimental details
-        :param verbose: bool, whether or not to print the explicit values for each experimental variable.
-                        Default is False, which prints the number of unqiue values for each variable.
+        :param verbose: bool; whether or not to print the explicit values for each experimental variable.
+                        Default (False) prints the number of unqiue values for each variable.
         :return:
         """
         for col in self.experiment_summary.columns:
@@ -194,10 +204,6 @@ class DEAnalysis(object):
                                                     levels=self.make_model_matrix())
         return contrast_obj
 
-    def linear_fit(self, data, design):
-        fit_obj = self.limma.lmFit(object=data, design=design)
-        return fit_obj
-
     def differential_expression_fit(self, fit_obj, contrast_obj):
         contrast_fit = self.limma.contrasts_fit(fit=fit_obj, contrasts=contrast_obj)
         bayes_fit = self.limma.eBayes(contrast_fit)
@@ -217,7 +223,7 @@ class DEAnalysis(object):
         design = self.make_model_matrix()
         data = self.make_data_matrix()
         contrast_obj = self.make_contrasts(contrasts)
-        l_fit = self.linear_fit(data, design)
+        l_fit = self.limma.lmFit(data, design)
         de_fit = self.differential_expression_fit(l_fit, contrast_obj)
         results = self.de_results(de_fit, p_value=p_value, n=n, **kwargs)
         return results
