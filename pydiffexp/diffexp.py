@@ -167,16 +167,29 @@ class DEAnalysis(object):
                 unique = len(sorted(list(set(self.experiment_summary[col]))))
             print(col + "s:", unique)
 
-    def make_model_matrix(self):
+    def _make_model_matrix(self, formula='~0+x'):
+        """
+        Make the stats model matrix in R
+        :param: formula: str; R formula character used to create the model matrix
+        :return:    R-matrix
+        """
         # Make an robject for the model matrix
         r_sample_labels = robjects.FactorVector(self.sample_labels)
-        fmla = robjects.Formula('~0+x')
+
+        # Create R formula object, and change the environment variable
+        fmla = robjects.Formula(formula)
         fmla.environment['x'] = r_sample_labels
+
+        # Make the design matrix. self.stats is a bound R package
         design = self.stats.model_matrix(fmla)
         design.colnames = robjects.StrVector(sorted(list(set(self.sample_labels))))
         return design
 
-    def make_data_matrix(self):
+    def _make_data_matrix(self):
+        """
+        Make the data matrix as an R object
+        :return:
+        """
         # Get the sample labels, genes, and data
         genes = self.raw_data.index.values
 
@@ -193,18 +206,31 @@ class DEAnalysis(object):
         r_matrix.rownames = robjects.StrVector(genes)
         return r_matrix
 
-    def make_contrasts(self, contrasts):
+    def _make_contrasts(self, contrasts, design):
+        """
+        Make an R contrasts object that is used by limma
+        :param contrasts: dict, list, str; The contrast(s) to use in differential expression.  A dictionary will be
+            passed as kwargs, which is analagous to the ellipsis "..." in R.
+        :return:
+        """
         # If the contrasts are a dictionary they need to be unpacked as kwargs
         if isinstance(contrasts, dict):
             contrast_obj = self.limma.makeContrasts(**contrasts,
-                                                    levels=self.make_model_matrix())
+                                                    levels=self._make_model_matrix())
         # A string or list of strings can be passed directly
         else:
             contrast_obj = self.limma.makeContrasts(contrasts=contrasts,
-                                                    levels=self.make_model_matrix())
+                                                    levels=self._make_model_matrix())
         return contrast_obj
 
-    def differential_expression_fit(self, fit_obj, contrast_obj):
+    def _differential_expression_fit(self, fit_obj, contrast_obj):
+        """
+        Calculate differential expression using empirical bayes
+        :param fit_obj: MArrayLM; linear model fit from limma in R. Typically from R function limma.lmFit()
+        :param contrast_obj: R-matrix; numeric matrix with rows corresponding to coefficients in fit and columns
+            containing contrasts.
+        :return:
+        """
         contrast_fit = self.limma.contrasts_fit(fit=fit_obj, contrasts=contrast_obj)
         bayes_fit = self.limma.eBayes(contrast_fit)
         return bayes_fit
@@ -220,11 +246,11 @@ class DEAnalysis(object):
         return df
 
     def fit(self, contrasts, p_value=0.05, n='inf', **kwargs):
-        design = self.make_model_matrix()
-        data = self.make_data_matrix()
-        contrast_obj = self.make_contrasts(contrasts)
+        design = self._make_model_matrix()
+        data = self._make_data_matrix()
+        contrast_obj = self._make_contrasts(contrasts)
         l_fit = self.limma.lmFit(data, design)
-        de_fit = self.differential_expression_fit(l_fit, contrast_obj)
+        de_fit = self._differential_expression_fit(l_fit, contrast_obj)
         results = self.de_results(de_fit, p_value=p_value, n=n, **kwargs)
         return results
 

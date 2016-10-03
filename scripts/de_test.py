@@ -20,3 +20,4 @@ c_string = "KO_0-WT_0"
 results = de_object.fit(c_string, p_value=0.05)
 # col_order = ['Diff0', 'Diff15', 'Diff60', 'Diff120'] + results.columns.tolist()[4:]
 print(results)
+
