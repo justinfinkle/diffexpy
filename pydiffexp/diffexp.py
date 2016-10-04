@@ -22,7 +22,19 @@ def is_multiindex(df):
     return tuple(mi)
 
 
-def make_hierarchical(df, index_names=None, axis=0, split_str='_'):
+def make_hierarchical(df, index_names=None, split_str='_'):
+    """
+
+    Parameters
+    ----------
+    df
+    index_names
+    split_str
+
+    Returns
+    -------
+
+    """
     """
     Make a regular dataframe hierarchical by adding a MultiIndex
     :param df: dataframe; the dataframe to made hierarchical
@@ -32,19 +44,28 @@ def make_hierarchical(df, index_names=None, axis=0, split_str='_'):
     :return: dataframe; hierarchical dataframe with multiindex
     """
 
-    hierarchical_df = df.copy()
-
-    index = df.index if axis == 0 else df.columns
-
     # Split each label into hierarchy
-    formatted_index = [tuple(ind.split(split_str)) for ind in index]
-    m_index = pd.MultiIndex.from_tuples(formatted_index, names=index_names)
+    try:
+        index = df.columns
+        s_index = split_index(index, split_str)
+    except ValueError:
+        df = df.T
+        index = df.columns
+        s_index = split_index(index, split_str)
+        warnings.warn('Multiindex found for rows, but not columns. Returned data frame is transposed from input')
 
-    if axis == 0:
-        hierarchical_df.index = m_index
-    elif axis == 1:
-        hierarchical_df.columns = m_index
-    return hierarchical_df
+    h_df = df.copy()
+    m_index = pd.MultiIndex.from_tuples(s_index, names=index_names)
+    h_df.columns = m_index
+
+    return h_df
+
+
+def split_index(index, split_str):
+    s_index = [tuple(ind.split(split_str)) for ind in index if split_str in ind]
+    if len(s_index) != len(index):
+        raise ValueError('Index not split properly using supplied string')
+    return s_index
 
 
 def keep_genes(pearson_df, metric='Mean_pearson', threshold=0.5):
@@ -109,27 +130,44 @@ class DEAnalysis(object):
     An object that does differential expression analysis with time course data
     """
 
-    def __init__(self, df):
-        self.raw_data = df
+    def __init__(self):
+        self.data = None
         self.sample_labels = None
         self.contrasts = None
-        self.experiment_summary = self.get_experiment_summary()
-
-        # Confirm that data is multiindex
-        self.multiindex = is_multiindex(self.raw_data)
-        if not self.multiindex[1] and not self.multiindex[0]:
-            raise ValueError("The columns of the dataframe must have a multiindex")
+        self.experiment_summary = None
 
         # Import requisite R packages
         self.limma = importr('limma')
         self.stats = importr('stats')
+
+    def set_data(self, df, index_names=None, split_str='_'):
+        # Check for a multiindex or try making one
+        multiindex = is_multiindex(df)
+        h_df = None
+        if sum(multiindex) == 0:
+            h_df = make_hierarchical(df, index_names=index_names, split_str=split_str)
+        else:
+            if multiindex[1]:
+                h_df = df.copy()
+            elif multiindex[0] and not multiindex[1]: # Second part is probably redundant
+                h_df = df.T
+                warnings.warn('DataFrame transposed so multiindex is along columns.')
+
+            # Doublecheck multinindex
+            multiindex = is_multiindex(h_df)
+            if sum(multiindex) == 0:
+                raise ValueError('No valid multiindex was found, and once could not be created')
+
+        self.data = h_df
+
+
 
     def get_experiment_summary(self, include_id=True):
         """
         Summarize the experiment details in a data frame
         :return:
         """
-        index = self.raw_data.columns
+        index = self.data.columns
         summary_df = pd.DataFrame()
         for ii, name in enumerate(index.names):
             summary_df[name] = index.levels[ii].values[index.labels[ii]]
@@ -191,10 +229,10 @@ class DEAnalysis(object):
         :return:
         """
         # Get the sample labels, genes, and data
-        genes = self.raw_data.index.values
+        genes = self.data.index.values
 
         # Log transform expression and correct values if needed
-        data = np.log2(self.raw_data.values)
+        data = np.log2(self.data.values)
         if np.sum(np.isnan(data)) > 0:
             warnings.warn("NaNs detected during log expression transformation. Setting to NaN values to zero.")
             data = np.nan_to_num(data)
