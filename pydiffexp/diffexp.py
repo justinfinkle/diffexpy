@@ -135,6 +135,11 @@ class DEAnalysis(object):
         self.sample_labels = None
         self.contrasts = None
         self.experiment_summary = None
+        self.design = None
+        self.data_matrix = None
+        self.contrast_robj = None
+        self.l_fit = None
+        self.de_fit = None
 
         # Import requisite R packages
         self.limma = importr('limma')
@@ -149,7 +154,7 @@ class DEAnalysis(object):
         else:
             if multiindex[1]:
                 h_df = df.copy()
-            elif multiindex[0] and not multiindex[1]: # Second part is probably redundant
+            elif multiindex[0] and not multiindex[1]:  # Second part is probably redundant
                 h_df = df.T
                 warnings.warn('DataFrame transposed so multiindex is along columns.')
 
@@ -159,8 +164,7 @@ class DEAnalysis(object):
                 raise ValueError('No valid multiindex was found, and once could not be created')
 
         self.data = h_df
-
-
+        self.experiment_summary = self.get_experiment_summary()
 
     def get_experiment_summary(self, include_id=True):
         """
@@ -244,7 +248,7 @@ class DEAnalysis(object):
         r_matrix.rownames = robjects.StrVector(genes)
         return r_matrix
 
-    def _make_contrasts(self, contrasts, design):
+    def _make_contrasts(self, contrasts, levels):
         """
         Make an R contrasts object that is used by limma
         :param contrasts: dict, list, str; The contrast(s) to use in differential expression.  A dictionary will be
@@ -254,11 +258,11 @@ class DEAnalysis(object):
         # If the contrasts are a dictionary they need to be unpacked as kwargs
         if isinstance(contrasts, dict):
             contrast_obj = self.limma.makeContrasts(**contrasts,
-                                                    levels=self._make_model_matrix())
+                                                    levels=levels)
         # A string or list of strings can be passed directly
         else:
             contrast_obj = self.limma.makeContrasts(contrasts=contrasts,
-                                                    levels=self._make_model_matrix())
+                                                    levels=levels)
         return contrast_obj
 
     def _differential_expression_fit(self, fit_obj, contrast_obj):
@@ -284,12 +288,17 @@ class DEAnalysis(object):
         return df
 
     def fit(self, contrasts, p_value=0.05, n='inf', **kwargs):
-        design = self._make_model_matrix()
-        data = self._make_data_matrix()
-        contrast_obj = self._make_contrasts(contrasts)
-        l_fit = self.limma.lmFit(data, design)
-        de_fit = self._differential_expression_fit(l_fit, contrast_obj)
-        results = self.de_results(de_fit, p_value=p_value, n=n, **kwargs)
+        # Save the user supplied contrasts
+        self.contrasts = contrasts
+
+        if self.data is None:
+            raise ValueError('Please add data using set_data() before attempting to fit.')
+        self.design = self._make_model_matrix()
+        self.data_matrix = self._make_data_matrix()
+        self.contrast_robj = self._make_contrasts(contrasts=self.contrasts, levels=self.design)
+        self.l_fit = self.limma.lmFit(self.data_matrix, self.design)
+        self.de_fit = self._differential_expression_fit(self.l_fit, self.contrast_robj)
+        results = self.de_results(self.de_fit, p_value=p_value, n=n, **kwargs)
         return results
 
     # def __init__(self, raw_data_path=None, sep='\t', skiprows=6, header=0, pre_filter_data=True, threshold=0.5,
