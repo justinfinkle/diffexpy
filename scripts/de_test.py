@@ -16,5 +16,5 @@ c_dict = {'Diff0': "(KO_15-KO_0)-(WT_15-WT_0)", 'Diff15': "(KO_60-KO_15)-(WT_60-
           'Diff60': "(KO_120-KO_60)-(WT_120-WT_60)", 'Diff120': "(KO_240-KO_120)-(WT_240-WT_120)"}
 c_list = ["KO_15-KO_0", "KO_60-KO_15", "KO_120-KO_60", "KO_240-KO_120"]
 c_string = "KO_0-WT_0"
-dea.fit(c_list)
-print(dea.results)
+dea.fit(c_dict)
+print(dea.get_results())

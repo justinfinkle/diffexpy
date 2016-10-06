@@ -263,8 +263,6 @@ class DEAnalysis(object):
         Fit the differential expression model using the supplied contrasts
         :param contrasts: str, list, or dict; contrasts to test for differential expression. Strings and elements of
         lists must be in the format "X-Y". Dictionary elements must be in {contrast_name:"(X1-X0)-(Y1-Y0)")
-        :param use_fstat: bool; select significant results using F-statistic. Should True when testing multiple
-        contrasts, such as in a time series
         :return:
         """
         # Save the user supplied contrasts
