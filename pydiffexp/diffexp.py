@@ -89,6 +89,7 @@ class DEAnalysis(object):
         self.contrast_robj = None
         self.l_fit = None
         self.de_fit = None
+        self.results = None
 
         # Import requisite R packages
         self.limma = importr('limma')
@@ -214,7 +215,7 @@ class DEAnalysis(object):
                                                     levels=levels)
         return contrast_obj
 
-    def _differential_expression_fit(self, fit_obj, contrast_obj):
+    def _ebayes(self, fit_obj, contrast_obj):
         """
         Calculate differential expression using empirical bayes
         :param fit_obj: MArrayLM; linear model fit from limma in R. Typically from R function limma.lmFit()
@@ -226,32 +227,65 @@ class DEAnalysis(object):
         bayes_fit = self.limma.eBayes(contrast_fit)
         return bayes_fit
 
-    def de_results(self, fit_obj, use_fstat=True, **kwargs):
+    def get_results(self, use_fstat=None, p_value=0.05, n='inf', **kwargs):
+        """
+        Print get_results of differential expression analysis
+        :param use_fstat: bool; select genes using F-statistic. Useful if testing significance for multiple contrasts,
+        such as a time series
+        :param p_value float; cutoff for significant get_results. Default is 0.05. If np.inf, then no cutoff is applied
+        :param n int or 'inf'; number of significant get_results to include in output. Default is 'inf' which includes all
+        get_results passing the threshold
+        :param kwargs: additional arguments to pass to topTable. see topTable documentation in R for more details.
+        :return:
+        """
+
+        # Update kwargs with commonly used ones provided in this API
+        kwargs = dict(kwargs, p_value=p_value, n=n)
+
+        # Use fstat if multiple contrasts supplied
+        if use_fstat is None:
+            use_fstat = False if (isinstance(self.contrasts, str) or
+                                  (isinstance(self.contrasts, list) and len(self.contrasts) > 1)) else True
+
         if use_fstat:
-            table = self.limma.topTableF(fit_obj, **kwargs)
+            if 'coef' in kwargs.keys():
+                raise ValueError('Cannot specify value for argument "coef" when using F statistic for topTableF')
+            table = self.limma.topTableF(self.de_fit, **kwargs)
         else:
-            table = self.limma.topTable(fit_obj, **kwargs)
+            table = self.limma.topTable(self.de_fit, **kwargs)
 
         with localconverter(default_converter + pandas2ri.converter) as cv:
             df = pandas2ri.ri2py(table)
         return df
 
-    def fit(self, contrasts, p_value=0.05, n='inf', **kwargs):
+    def fit(self, contrasts):
+        """
+        Fit the differential expression model using the supplied contrasts
+        :param contrasts: str, list, or dict; contrasts to test for differential expression. Strings and elements of
+        lists must be in the format "X-Y". Dictionary elements must be in {contrast_name:"(X1-X0)-(Y1-Y0)")
+        :param use_fstat: bool; select significant results using F-statistic. Should True when testing multiple
+        contrasts, such as in a time series
+        :return:
+        """
         # Save the user supplied contrasts
         self.contrasts = contrasts
-
         if self.data is None:
             raise ValueError('Please add data using set_data() before attempting to fit.')
+
+        # Setup design, data, and contrast matrices
         self.design = self._make_model_matrix()
         self.data_matrix = self._make_data_matrix()
         self.contrast_robj = self._make_contrasts(contrasts=self.contrasts, levels=self.design)
+
+        # Perform a linear fit, then empirical bayes fit
         self.l_fit = self.limma.lmFit(self.data_matrix, self.design)
-        self.de_fit = self._differential_expression_fit(self.l_fit, self.contrast_robj)
-        results = self.de_results(self.de_fit, p_value=p_value, n=n, **kwargs)
-        return results
+        self.de_fit = self._ebayes(self.l_fit, self.contrast_robj)
+
+        # Set results to include all test values
+        self.results = self.get_results(p_value=np.inf)
 
     def to_pickle(self, path):
-        # Note, this is taken direclty from pandas generic.py which defines the method in class NDFrame
+        # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame
         """
         Pickle (serialize) object to input file path
 
