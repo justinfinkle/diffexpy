@@ -19,6 +19,4 @@ c_string = "KO_0-WT_0"
 
 results = dea.fit(c_string, p_value=0.05,  use_fstat=False)
 # col_order = ['Diff0', 'Diff15', 'Diff60', 'Diff120'] + results.columns.tolist()[4:]
-for v in results.index.values:
-    print(v)
 
