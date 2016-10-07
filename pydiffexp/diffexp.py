@@ -79,7 +79,7 @@ class DEAnalysis(object):
     An object that does differential expression analysis with time course data
     """
 
-    def __init__(self):
+    def __init__(self, df=None, index_names=None, split_str='_'):
         self.data = None
         self.sample_labels = None
         self.contrasts = None
@@ -91,11 +91,14 @@ class DEAnalysis(object):
         self.de_fit = None
         self.results = None
 
+        if df is not None:
+            self._set_data(df, index_names=index_names, split_str=split_str)
+
         # Import requisite R packages
         self.limma = importr('limma')
         self.stats = importr('stats')
 
-    def set_data(self, df, index_names=None, split_str='_'):
+    def _set_data(self, df, index_names=None, split_str='_'):
         # Check for a multiindex or try making one
         multiindex = is_multiindex(df)
         h_df = None
