@@ -79,7 +79,7 @@ class DEAnalysis(object):
     An object that does differential expression analysis with time course data
     """
 
-    def __init__(self, df=None, index_names=None, split_str='_'):
+    def __init__(self, df=None, index_names=None, split_str='_', reference_labels=None):
         self.data = None
         self.sample_labels = None
         self.contrasts = None
@@ -92,13 +92,13 @@ class DEAnalysis(object):
         self.results = None
 
         if df is not None:
-            self._set_data(df, index_names=index_names, split_str=split_str)
+            self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels)
 
         # Import requisite R packages
         self.limma = importr('limma')
         self.stats = importr('stats')
 
-    def _set_data(self, df, index_names=None, split_str='_'):
+    def _set_data(self, df, index_names=None, split_str='_', reference_labels=None):
         # Check for a multiindex or try making one
         multiindex = is_multiindex(df)
         h_df = None
@@ -117,9 +117,9 @@ class DEAnalysis(object):
                 raise ValueError('No valid multiindex was found, and once could not be created')
 
         self.data = h_df
-        self.experiment_summary = self.get_experiment_summary()
+        self.experiment_summary = self.get_experiment_summary(reference_labels=reference_labels)
 
-    def get_experiment_summary(self, include_id=True):
+    def get_experiment_summary(self, reference_labels=None):
         """
         Summarize the experiment details in a data frame
         :return:
@@ -128,19 +128,29 @@ class DEAnalysis(object):
         summary_df = pd.DataFrame()
         for ii, name in enumerate(index.names):
             summary_df[name] = index.levels[ii].values[index.labels[ii]]
-        if include_id:
-            summary_df['sample_id'], self.sample_labels = self.make_sample_ids(summary_df)
+        if reference_labels is not None:
+            summary_df['sample_id'], self.sample_labels = self.make_sample_ids(summary_df,
+                                                                               reference_labels=reference_labels)
+        else:
+            warnings.warn('Sample IDs and labels not set because no reference labels supplied. R data matrix and '
+                          'contrasts cannot be created without sample IDs. Setting sample labels to integers')
+            self.sample_labels = list(map(lambda x: 'x%i' % x, range(len(summary_df))))
         return summary_df
 
     @staticmethod
-    def make_sample_ids(summary, id_ref=('condition', 'time')):
+    def make_sample_ids(summary, reference_labels):
         """
         Make unique sample ID combinations.
         :param summary: dataframe; summary of experiments and samples. See get_experiment summary
-        :param id_ref:
+        :param reference_labels
         :return:
         """
-        combos = ['_'.join(combo) for combo in summary.loc[:, id_ref].values.tolist()]
+        ref_not_in_summary = [label for label in reference_labels if label not in summary.columns.values]
+        if ref_not_in_summary:
+            raise ValueError('Reference label(s) [%s] not found in the dataframe hierarchy variables.'
+                             % ', '.join(ref_not_in_summary))
+        # Make unique combinations from the reference labels
+        combos = ['_'.join(combo) for combo in summary.loc[:, reference_labels].values.tolist()]
         combo_set = sorted(list(set(combos)))
         ids = [combo_set.index(combo) for combo in combos]
         return ids, combos

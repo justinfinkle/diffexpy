@@ -7,7 +7,7 @@ test_path = "/Users/jfinkle/Documents/Northwestern/MoDyLS/Python/sprouty/data/ra
 raw_data = pd.read_csv(test_path, index_col=0)
 hierarchy = ['condition', 'well', 'time', 'replicate']
 
-dea = DEAnalysis(raw_data, index_names=hierarchy)
+dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition', 'time'])
 
 
 # Types of contrasts
