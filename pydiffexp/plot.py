@@ -5,9 +5,12 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['font.sans-serif'] = 'Arial'
+from palettable.colorbrewer.qualitative import Dark2_8
 
 
-def volcano_plot(df, p_value=0.05, log2_fc=1, x_colname='logFC', y_colname='adj.P.Val'):
+def volcano_plot(df, p_value=0.05, log2_fc=1, x_colname='logFC', y_colname='adj.P.Val', cutoff_lines=True, top_n=None,
+                 top_by='adj.P.Val'):
+
     # Keep NaNs for reporting, split dataframe into two dataframes based on cutoffs
     df['-log10(p)'] = -np.log10(df[y_colname])
     nans = df[df.isnull().any(axis=1)]
@@ -23,85 +26,32 @@ def volcano_plot(df, p_value=0.05, log2_fc=1, x_colname='logFC', y_colname='adj.
         rounded_lim = int(2 * np.floor(max_x/2))
         xticks = np.arange(-rounded_lim, rounded_lim+2, 2)
 
-    # Make plot
-
     fig, ax = plt.subplots(figsize=(10, 10))
-    ax.scatter(sig[x_colname], sig['-log10(p)'], c='b', s=100)
-    ax.scatter(insig[x_colname], insig['-log10(p)'], c='k', s=100)
+    # Split top data points if requested
+    if top_n:
+        ascending = True if top_by == 'adj.P.Val' else False
+        sig.sort_values(top_by, ascending=ascending)
+        top_sig = sig[:top_n]
+        sig = sig[top_n:]
+        ax.plot(top_sig[x_colname], top_sig['-log10(p)'], 'o', c=Dark2_8.mpl_colors[0], ms=10, zorder=2)
+        for row in top_sig.iterrows():
+            plt.annotate(row[0], xy=(row[1]['logFC'], row[1]['-log10(p)']), fontsize=16, style='italic')
+    # Make plot
+    ax.plot(sig[x_colname], sig['-log10(p)'], 'o', c=Dark2_8.mpl_colors[2], ms=10, zorder=1)
+    ax.plot(insig[x_colname], insig['-log10(p)'], 'o', c=Dark2_8.mpl_colors[-1], ms=10, zorder=0, mew=0)
+
+    # Adjust axes
     ax.set_xlim([-max_x, max_x])
     ax.set_ylim([0, max_y])
-    for ii, xy in enumerate(zip(log2_fc[top_idx], adj_pval[top_idx])):
-       plt.annotate(results_df.iloc[ii,0].capitalize(), xy=xy, fontsize=16, style='italic')
-    plt.tight_layout()
+
+    # Add cutoff lines
+    if cutoff_lines:
+        color = Dark2_8.mpl_colors[1]
+        ax.plot([-max_x, max_x], [-np.log10(p_value), -np.log10(p_value)], '--', c=color, lw=3)
+        ax.plot([-log2_fc, -log2_fc], [0, max_y], '--', c=color, lw=3)
+        ax.plot([log2_fc, log2_fc], [0, max_y], '--', c=color, lw=3)
+
     ax.tick_params(axis='both', which='major', labelsize=24)
     ax.set_xlabel(r'$log_2(\frac{KO}{WT})$', fontsize=28)
-    ax.set_ylabel(r'$-log_{10}(pval)$', fontsize=28)
+    ax.set_ylabel(r'$-log_{10}$(corrected p-value)', fontsize=28)
     plt.show()
-#     boolean_idx = np.arange(len(log2_fc))[(np.abs(log2_fc.values) >= log2_thresh) & (adj_pval.values >= log_odds_thresh)]
-#     leftover_idx = np.arange(len(log2_fc))[
-#         ~((np.abs(log2_fc.values) >= log2_thresh) & (adj_pval.values >= log_odds_thresh))]
-#     x_filtered = x[x > x_cutoff]
-#     y_filtered = y[y > y_cutoff]
-#     fig, ax = plt.subplots(figsize=(10, 10))
-#     ax.scatter(log2_fc[top_idx], adj_pval[top_idx], c='b', s=100)
-#     ax.scatter(log2_fc[remaining_idx], adj_pval[remaining_idx], c='orange', s=100)
-#     ax.scatter(log2_fc[leftover_idx], adj_pval[leftover_idx], c='k', s=100)
-#     ax.set_xlim([-max_fc, max_fc])
-#     ax.set_ylim([0, np.ceil(np.max(adj_pval))])
-#     ax.set_xticks(xticks)
-#     ax.set_yticks(np.arange(21, step=2))
-#     ax.tick_params(axis='both', which='major', labelsize=24)
-#     ax.set_xlabel(r'$log_2(\frac{KO}{WT})$', fontsize=28)
-#     ax.set_ylabel(r'$-log_{10}(pval)$', fontsize=28)
-#
-# filepath = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Python/sprouty/data/intersection_genes_pvals.csv'
-# save_string = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Python/sprouty/data/differential_expression/raw_python_volcano_plot2.pdf'
-# save_genes = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Python/sprouty/data/ko0_wt0_de_expressed_genes.txt'
-#
-# results_df = pd.read_csv(filepath)
-# new_cols = results_df.columns.values
-# new_cols[0] = 'Gene'
-# results_df.columns = new_cols
-#
-# log2_fc = results_df.logFC
-# adj_pval = -np.log10(results_df['adj.P.Val'])
-# log_odds = results_df.B
-#
-# # Rename and reformat labels
-# results_df.Gene = [(label.replace('X', '').capitalize()).replace('rik', 'Rik') if 'RIK' in label
-#                    else (label.capitalize()).replace('rik', 'Rik')
-#                    for label in results_df.Gene]
-#
-# log2_thresh = 1
-# log_odds_thresh = 4.6   # Corresponds to 99% of differential expression
-#
-# # Calculate indices that meet the above criteria
-# boolean_idx = np.arange(len(log2_fc))[(np.abs(log2_fc.values)>=log2_thresh) & (adj_pval.values>=log_odds_thresh)]
-# leftover_idx = np.arange(len(log2_fc))[~((np.abs(log2_fc.values)>=log2_thresh) & (adj_pval.values>=log_odds_thresh))]
-# n_criteria = len(boolean_idx)
-#
-#
-# n_top = 10
-# top_idx = boolean_idx[:n_top]
-# remaining_idx = boolean_idx[n_top:]
-# max_fc = np.ceil(np.max(np.abs(log2_fc)))
-# if max_fc<10:
-#     rounded_lim = int(2 * np.floor(float(max_fc)/2))
-#     xticks = np.arange(-rounded_lim, rounded_lim+2, 2)
-#
-# fig, ax = plt.subplots(figsize=(10,10))
-# ax.scatter(log2_fc[top_idx], adj_pval[top_idx], c='b', s=100)
-# ax.scatter(log2_fc[remaining_idx], adj_pval[remaining_idx], c='orange', s=100)
-# ax.scatter(log2_fc[leftover_idx], adj_pval[leftover_idx], c='k', s=100)
-# ax.set_xlim([-max_fc, max_fc])
-# ax.set_ylim([0, np.ceil(np.max(adj_pval))])
-# ax.set_xticks(xticks)
-# ax.set_yticks(np.arange(21, step=2))
-# ax.tick_params(axis='both', which='major', labelsize=24)
-# ax.set_xlabel(r'$log_2(\frac{KO}{WT})$', fontsize=28)
-# ax.set_ylabel(r'$-log_{10}(pval)$', fontsize=28)
-# #for ii, xy in enumerate(zip(log2_fc[top_idx], adj_pval[top_idx])):
-# #    plt.annotate(results_df.iloc[ii,0].capitalize(), xy=xy, fontsize=16, style='italic')
-# # plt.tight_layout()
-# plt.show()
-# #plt.savefig(save_string, format='pdf')
