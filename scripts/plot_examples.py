@@ -1,5 +1,6 @@
 import sys, warnings
 import pandas as pd
+import numpy as np
 from pydiffexp import DEAnalysis, volcano_plot
 
 
@@ -21,4 +22,6 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     dea.fit(c_string)
 
+print(dea.data_matrix.rx(5340,True))
+sys.exit()
 volcano_plot(dea.results)
