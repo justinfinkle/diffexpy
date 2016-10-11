@@ -7,27 +7,36 @@ mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['font.sans-serif'] = 'Arial'
 
 
-def volcano_plot(df, p_value=0.05, log2_fc=1):
+def volcano_plot(df, p_value=0.05, log2_fc=1, x_colname='logFC', y_colname='adj.P.Val'):
+    # Keep NaNs for reporting, split dataframe into two dataframes based on cutoffs
+    df['-log10(p)'] = -np.log10(df[y_colname])
     nans = df[df.isnull().any(axis=1)]
     df = df.dropna()
-    sig = df[(df['adj.P.Val'] <= p_value) & (np.abs(df['logFC']) >= log2_fc)]
-    insig = df[~(df['adj.P.Val'] <= p_value) | ~(np.abs(df['logFC']) >= log2_fc)]
+    sig = df[(df[y_colname] <= p_value) & (np.abs(df[x_colname]) >= log2_fc)]
+    insig = df[~(df[y_colname] <= p_value) | ~(np.abs(df[x_colname]) >= log2_fc)]
 
-    max_y = np.ceil(np.max(np.abs(sig)))
-    # if max_fc<10:
-    #     rounded_lim = int(2 * np.floor(float(max_fc)/2))
-    #     xticks = np.arange(-rounded_lim, rounded_lim+2, 2)
+    max_y = np.max(sig['-log10(p)'])
+    max_x = np.ceil(np.max(np.abs(sig[x_colname])))
 
-    fig, ax = plt.subplots(figsize=(10,10))
-    ax.scatter(sig['logFC'], sig['adj.P.Val'], c='b', s=100)
-    ax.scatter(insig['logFC'], insig['adj.P.Val'], c='k', s=100)
-    ax.set_xlim([-max_fc, max_fc])
-    ax.set_ylim([0, np.ceil(np.max(adj_pval))])
-    ax.set_xticks(xticks)
-    ax.set_yticks(np.arange(21, step=2))
+    # Change number of ticks if necessary
+    if max_x <= 10:
+        rounded_lim = int(2 * np.floor(max_x/2))
+        xticks = np.arange(-rounded_lim, rounded_lim+2, 2)
+
+    # Make plot
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+    ax.scatter(sig[x_colname], sig['-log10(p)'], c='b', s=100)
+    ax.scatter(insig[x_colname], insig['-log10(p)'], c='k', s=100)
+    ax.set_xlim([-max_x, max_x])
+    ax.set_ylim([0, max_y])
+    for ii, xy in enumerate(zip(log2_fc[top_idx], adj_pval[top_idx])):
+       plt.annotate(results_df.iloc[ii,0].capitalize(), xy=xy, fontsize=16, style='italic')
+    plt.tight_layout()
     ax.tick_params(axis='both', which='major', labelsize=24)
     ax.set_xlabel(r'$log_2(\frac{KO}{WT})$', fontsize=28)
     ax.set_ylabel(r'$-log_{10}(pval)$', fontsize=28)
+    plt.show()
 #     boolean_idx = np.arange(len(log2_fc))[(np.abs(log2_fc.values) >= log2_thresh) & (adj_pval.values >= log_odds_thresh)]
 #     leftover_idx = np.arange(len(log2_fc))[
 #         ~((np.abs(log2_fc.values) >= log2_thresh) & (adj_pval.values >= log_odds_thresh))]
