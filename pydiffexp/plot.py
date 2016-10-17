@@ -3,13 +3,13 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from palettable.colorbrewer.qualitative import Dark2_8
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['font.sans-serif'] = 'Arial'
-from palettable.colorbrewer.qualitative import Dark2_8
 
 
 def volcano_plot(df, p_value=0.05, log2_fc=1, x_colname='logFC', y_colname='adj.P.Val', cutoff_lines=True, top_n=None,
-                 top_by='adj.P.Val'):
+                 top_by='adj.P.Val', show_labels=False):
 
     # Keep NaNs for reporting, split dataframe into two dataframes based on cutoffs
     df['-log10(p)'] = -np.log10(df[y_colname])
@@ -30,12 +30,17 @@ def volcano_plot(df, p_value=0.05, log2_fc=1, x_colname='logFC', y_colname='adj.
     # Split top data points if requested
     if top_n:
         ascending = True if top_by == 'adj.P.Val' else False
-        sig.sort_values(top_by, ascending=ascending)
+        if top_by == 'logFC':
+            sig['sort'] = sig[top_by].abs()
+            sig = sig.sort_values('sort', ascending=ascending).drop('sort', axis=1)
+        else:
+            sig.sort_values(top_by, ascending=ascending, inplace=True)
         top_sig = sig[:top_n]
         sig = sig[top_n:]
         ax.plot(top_sig[x_colname], top_sig['-log10(p)'], 'o', c=Dark2_8.mpl_colors[0], ms=10, zorder=2)
-        for row in top_sig.iterrows():
-            plt.annotate(row[0], xy=(row[1]['logFC'], row[1]['-log10(p)']), fontsize=16, style='italic')
+        if show_labels:
+            for row in top_sig.iterrows():
+                plt.annotate(row[0], xy=(row[1]['logFC'], row[1]['-log10(p)']), fontsize=16, style='italic')
     # Make plot
     ax.plot(sig[x_colname], sig['-log10(p)'], 'o', c=Dark2_8.mpl_colors[2], ms=10, zorder=1)
     ax.plot(insig[x_colname], insig['-log10(p)'], 'o', c=Dark2_8.mpl_colors[-1], ms=10, zorder=0, mew=0)

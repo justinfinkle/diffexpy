@@ -12,5 +12,6 @@ setup(
         'rpy2',
         'numpy',
         'pandas',
+        'palettable',
     ]
 )
