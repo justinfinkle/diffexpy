@@ -88,16 +88,17 @@ class DEAnalysis(object):
     """
 
     def __init__(self, df=None, index_names=None, split_str='_', reference_labels=None):
-        self.data = None
+
+        self.data = None                    # type: pd.DataFrame
         self.sample_labels = None
         self.contrasts = None
-        self.experiment_summary = None
-        self.design = None
-        self.data_matrix = None
-        self.contrast_robj = None
-        self.l_fit = None
-        self.de_fit = None
-        self.results = None
+        self.experiment_summary = None      # type: pd.DataFrame
+        self.design = None                  # type: robjects.vectors.Matrix
+        self.data_matrix = None             # type: robjects.vectors.Matrix
+        self.contrast_robj = None           # type: robjects.vectors.Matrix
+        self.l_fit = None                   # type: robjects.vectors.ListVector
+        self.de_fit = None                  # type: robjects.vectors.ListVector
+        self.results = None                 # type: pd.DataFrame
 
         if df is not None:
             self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels)

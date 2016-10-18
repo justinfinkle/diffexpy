@@ -8,8 +8,21 @@ mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['font.sans-serif'] = 'Arial'
 
 
-def volcano_plot(df, p_value=0.05, log2_fc=1, x_colname='logFC', y_colname='adj.P.Val', cutoff_lines=True, top_n=None,
+def volcano_plot(df: pd.DataFrame, p_value: float=0.05, log2_fc=1, x_colname='logFC', y_colname='adj.P.Val', cutoff_lines=True, top_n=None,
                  top_by='adj.P.Val', show_labels=False):
+    """
+
+    :param df:
+    :param p_value:
+    :param log2_fc:
+    :param x_colname:
+    :param y_colname:
+    :param cutoff_lines:
+    :param top_n:
+    :param top_by:
+    :param show_labels:
+    :return:
+    """
 
     # Keep NaNs for reporting, split dataframe into two dataframes based on cutoffs
     df['-log10(p)'] = -np.log10(df[y_colname])
@@ -29,7 +42,7 @@ def volcano_plot(df, p_value=0.05, log2_fc=1, x_colname='logFC', y_colname='adj.
             sig['sort'] = sig[top_by].abs()
             sig = sig.sort_values('sort', ascending=ascending).drop('sort', axis=1)
         else:
-            sig.sort_values(top_by, ascending=ascending, inplace=True)
+            sig = sig.sort_values(top_by, ascending=ascending)
         top_sig = sig[:top_n]
         sig = sig[top_n:]
         ax.plot(top_sig[x_colname], top_sig['-log10(p)'], 'o', c=Dark2_8.mpl_colors[0], ms=10, zorder=2)
