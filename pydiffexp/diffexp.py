@@ -61,6 +61,14 @@ def make_hierarchical(df, index_names=None, split_str='_'):
     return h_df
 
 
+def str_convert(s):
+    try:
+        s = int(s)
+    except ValueError:
+        pass
+    return s
+
+
 def split_index(index, split_str):
     """
     Split a list of strings into a list of tuples.
@@ -68,7 +76,7 @@ def split_index(index, split_str):
     :param split_str: str; substring by which to split each string
     :return:
     """
-    s_index = [tuple(ind.split(split_str)) for ind in index if split_str in ind]
+    s_index = [tuple(map(str_convert, ind.split(split_str))) for ind in index if split_str in ind]
     if len(s_index) != len(index):
         raise ValueError('Index not split properly using supplied string')
     return s_index
@@ -127,7 +135,7 @@ class DEAnalysis(object):
         index = self.data.columns
         summary_df = pd.DataFrame()
         for ii, name in enumerate(index.names):
-            summary_df[name] = index.levels[ii].values[index.labels[ii]]
+            summary_df[name] = index.levels[ii].values[index.labels[ii]].astype(str)
         if reference_labels is not None:
             summary_df['sample_id'], self.sample_labels = self.make_sample_ids(summary_df,
                                                                                reference_labels=reference_labels)
