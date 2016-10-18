@@ -21,11 +21,6 @@ def volcano_plot(df, p_value=0.05, log2_fc=1, x_colname='logFC', y_colname='adj.
     max_y = np.max(sig['-log10(p)'])
     max_x = np.ceil(np.max(np.abs(sig[x_colname])))
 
-    # Change number of ticks if necessary
-    if max_x <= 10:
-        rounded_lim = int(2 * np.floor(max_x/2))
-        xticks = np.arange(-rounded_lim, rounded_lim+2, 2)
-
     fig, ax = plt.subplots(figsize=(10, 10))
     # Split top data points if requested
     if top_n:

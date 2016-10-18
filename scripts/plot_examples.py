@@ -1,6 +1,6 @@
 import sys, warnings
 import pandas as pd
-from pydiffexp import DEAnalysis, volcano_plot
+from pydiffexp import DEAnalysis, volcano_plot, is_multiindex
 
 
 # Variables
