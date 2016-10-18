@@ -8,7 +8,7 @@ mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['font.sans-serif'] = 'Arial'
 
 
-def volcano_plot(df: pd.DataFrame, p_value: float=0.05, log2_fc=1, x_colname='logFC', y_colname='adj.P.Val', cutoff_lines=True, top_n=None,
+def volcano_plot(df: pd.DataFrame, p_value: float=0.05, log2_fc=1, x_colname='logFC', y_colname='adj_pval', cutoff_lines=True, top_n=None,
                  top_by='adj.P.Val', show_labels=False):
     """
 

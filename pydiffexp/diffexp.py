@@ -249,7 +249,7 @@ class DEAnalysis(object):
         bayes_fit = self.limma.eBayes(contrast_fit)
         return bayes_fit
 
-    def get_results(self, use_fstat=None, p_value=0.05, n='inf', **kwargs):
+    def get_results(self, use_fstat=None, p_value=0.05, n='inf', **kwargs) -> pd.DataFrame:
         """
         Print get_results of differential expression analysis
         :param use_fstat: bool; select genes using F-statistic. Useful if testing significance for multiple contrasts,
@@ -277,7 +277,12 @@ class DEAnalysis(object):
             table = self.limma.topTable(self.de_fit, **kwargs)
 
         with localconverter(default_converter + pandas2ri.converter) as cv:
-            df = pandas2ri.ri2py(table)
+            df = pandas2ri.ri2py(table)     # type: pd.DataFrame
+
+        # Rename the column and add the negative log10 values
+        df.rename(columns={'adj.P.Val': 'adj_pval', 'P.Value': 'pval'}, inplace=True)
+        df['-log10p'] = -np.log10(df['adj_pval'])
+
         return df
 
     def fit(self, contrasts):
