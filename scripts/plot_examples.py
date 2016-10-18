@@ -10,6 +10,8 @@ hierarchy = ['condition', 'well', 'time', 'replicate']
 
 raw_data[raw_data <= 0] = 1
 dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition', 'time'])
+print(dea.data)
+sys.exit()
 
 # Types of contrasts
 c_dict = {'Diff0': "(KO_15-KO_0)-(WT_15-WT_0)", 'Diff15': "(KO_60-KO_15)-(WT_60-WT_15)",

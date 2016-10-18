@@ -22,7 +22,7 @@ def is_multiindex(df):
     return tuple(mi)
 
 
-def make_hierarchical(df, index_names=None, split_str='_'):
+def make_hierarchical(df, index_names=None, split_str='_') -> pd.DataFrame:
     """
 
     Parameters
@@ -125,7 +125,10 @@ class DEAnalysis(object):
             if sum(multiindex) == 0:
                 raise ValueError('No valid multiindex was found, and once could not be created')
 
+        h_df.sort_index(axis=1, inplace=True)
         self.data = h_df
+        # Sort multiindex
+
         self.experiment_summary = self.get_experiment_summary(reference_labels=reference_labels)
 
     def get_experiment_summary(self, reference_labels=None):
