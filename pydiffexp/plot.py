@@ -3,55 +3,58 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-from palettable.colorbrewer.qualitative import Dark2_8
+import palettable.colorbrewer as cbrewer
+
+# Set plot defaults
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['font.sans-serif'] = 'Arial'
+_colors = cbrewer.qualitative.Dark2_8.mpl_colors
 
 
-def volcano_plot(df: pd.DataFrame, p_value: float=0.05, log2_fc=1, x_colname='logFC', y_colname='adj_pval', cutoff_lines=True, top_n=None,
-                 top_by='adj.P.Val', show_labels=False):
-    """
+def volcano_plot(df: pd.DataFrame, p_value: float=0.05, fc=2, x_colname='logFC', y_colname='-log10p',
+                 cutoff_lines=True, top_n=None, top_by='-log10p', show_labels=False):
 
-    :param df:
-    :param p_value:
-    :param log2_fc:
-    :param x_colname:
-    :param y_colname:
-    :param cutoff_lines:
-    :param top_n:
-    :param top_by:
-    :param show_labels:
-    :return:
-    """
-
-    # Keep NaNs for reporting, split dataframe into two dataframes based on cutoffs
-    df['-log10(p)'] = -np.log10(df[y_colname])
-    nans = df[df.isnull().any(axis=1)]
+    # Get rid of NaN data
     df = df.dropna()
-    sig = df[(df[y_colname] <= p_value) & (np.abs(df[x_colname]) >= log2_fc)]
-    insig = df[~(df[y_colname] <= p_value) | ~(np.abs(df[x_colname]) >= log2_fc)]
 
-    max_y = np.max(sig['-log10(p)'])
+    # Convert cutoffs to logspace
+    log2_fc = np.log2(fc)
+    log10_pval = -np.log10(p_value)
+
+    # Split data into above and below cutoff dataframes
+    sig = df[(df[y_colname] >= log10_pval) & (np.abs(df[x_colname]) >= log2_fc)]
+    insig = df[~(df[y_colname] >= log10_pval) | ~(np.abs(df[x_colname]) >= log2_fc)]
+
+    # Get maximum values for formatting latter
+    max_y = np.max(sig[y_colname])
     max_x = np.ceil(np.max(np.abs(sig[x_colname])))
 
     fig, ax = plt.subplots(figsize=(10, 10))
+
     # Split top data points if requested
     if top_n:
-        ascending = True if top_by == 'adj.P.Val' else False
-        if top_by == 'logFC':
-            sig['sort'] = sig[top_by].abs()
-            sig = sig.sort_values('sort', ascending=ascending).drop('sort', axis=1)
+
+        # Find points to highlight
+        sort = set()
+        if isinstance(top_by, list):
+            for col in top_by:
+                sort = sort.union(set(sig.index[np.argsort(np.abs(sig[col]))[::-1]][:top_n].values))
+        elif isinstance(top_by, str):
+            sort = sort.union(set(sig.index[np.argsort(np.abs(sig[top_by]))[::-1]][:top_n].values))
         else:
-            sig = sig.sort_values(top_by, ascending=ascending)
-        top_sig = sig[:top_n]
-        sig = sig[top_n:]
-        ax.plot(top_sig[x_colname], top_sig['-log10(p)'], 'o', c=Dark2_8.mpl_colors[0], ms=10, zorder=2)
+            raise ValueError('top_by must be a string or list of values found in the DataFrame used for the plot')
+
+        top_sig = sig.loc[sort]
+        sig = sig.drop(sort)
+        ax.plot(top_sig[x_colname], top_sig[y_colname], 'o', c=_colors[0], ms=10, zorder=2, label='Top Genes')
+
         if show_labels:
             for row in top_sig.iterrows():
-                plt.annotate(row[0], xy=(row[1]['logFC'], row[1]['-log10(p)']), fontsize=16, style='italic')
+                plt.annotate(row[0], xy=(row[1]['logFC'], row[1][y_colname]), fontsize=24, style='italic')
+
     # Make plot
-    ax.plot(sig[x_colname], sig['-log10(p)'], 'o', c=Dark2_8.mpl_colors[2], ms=10, zorder=1)
-    ax.plot(insig[x_colname], insig['-log10(p)'], 'o', c=Dark2_8.mpl_colors[-1], ms=10, zorder=0, mew=0)
+    ax.plot(sig[x_colname], sig[y_colname], 'o', c=_colors[2], ms=10, zorder=1, label='Diff Exp')
+    ax.plot(insig[x_colname], insig[y_colname], 'o', c=_colors[-1], ms=10, zorder=0, mew=0, label='')
 
     # Adjust axes
     ax.set_xlim([-max_x, max_x])
@@ -59,12 +62,22 @@ def volcano_plot(df: pd.DataFrame, p_value: float=0.05, log2_fc=1, x_colname='lo
 
     # Add cutoff lines
     if cutoff_lines:
-        color = Dark2_8.mpl_colors[1]
-        ax.plot([-max_x, max_x], [-np.log10(p_value), -np.log10(p_value)], '--', c=color, lw=3)
+        color = _colors[1]
+        # P value line
+        ax.plot([-max_x, max_x], [log10_pval, log10_pval], '--', c=color, lw=3, label='Threshold')
+
+        # log fold change lines
         ax.plot([-log2_fc, -log2_fc], [0, max_y], '--', c=color, lw=3)
         ax.plot([log2_fc, log2_fc], [0, max_y], '--', c=color, lw=3)
 
+    ax.legend(loc='best', numpoints=1, fontsize=24)
+
+    # Adjust labels
     ax.tick_params(axis='both', which='major', labelsize=24)
     ax.set_xlabel(r'$log_2(\frac{KO}{WT})$', fontsize=28)
     ax.set_ylabel(r'$-log_{10}$(corrected p-value)', fontsize=28)
     plt.show()
+
+
+def tsplot():
+    pass
