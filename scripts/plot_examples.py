@@ -1,6 +1,6 @@
 import sys, warnings
 import pandas as pd
-from pydiffexp import DEAnalysis, volcano_plot, is_multiindex
+from pydiffexp import DEAnalysis, volcano_plot, tsplot
 
 # Variables
 test_path = "/Users/jfinkle/Documents/Northwestern/MoDyLS/Python/sprouty/data/raw_data/all_data_formatted.csv"
@@ -20,6 +20,6 @@ dea.fit(c_string)
 
 # volcano_plot(dea.results, top_n=10, top_by=['logFC', '-log10p'], show_labels=True)
 
-idx = pd.IndexSlice
-data = dea.data.loc['CTGF', idx['WT', :, :, 'A']]
-data.sort_index(level=2, inplace=True)
+data = dea.data.loc['ANGPTL4']
+tsplot(data)
+
