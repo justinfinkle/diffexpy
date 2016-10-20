@@ -1,46 +1,72 @@
-import sys
+import sys, inspect
 import pandas as pd
 import numpy as np
+from scipy import stats
+from cycler import cycler
 import matplotlib.pyplot as plt
+from matplotlib.pyplot import plot, fill_between
 import matplotlib as mpl
+import palettable.colorbrewer as cbrewer
+
+# Set plot defaults
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['font.sans-serif'] = 'Arial'
-from palettable.colorbrewer.qualitative import Dark2_8
+axes = {'labelsize': 28,
+        'titlesize': 28}
+mpl.rc('axes', **axes)
+mpl.rcParams['xtick.labelsize'] = 24
+mpl.rcParams['ytick.labelsize'] = 24
+mpl.rcParams['legend.fontsize'] = 24
+
+_colors = cbrewer.qualitative.Dark2_8.mpl_colors
+_paired = cbrewer.qualitative.Paired_9.mpl_colors
 
 
-def volcano_plot(df, p_value=0.05, log2_fc=1, x_colname='logFC', y_colname='adj.P.Val', cutoff_lines=True, top_n=None,
-                 top_by='adj.P.Val'):
+def volcano_plot(df: pd.DataFrame, p_value: float=0.05, fc=2, x_colname='logFC', y_colname='-log10p',
+                 cutoff_lines=True, top_n=None, top_by='-log10p', show_labels=False):
 
-    # Keep NaNs for reporting, split dataframe into two dataframes based on cutoffs
-    df['-log10(p)'] = -np.log10(df[y_colname])
-
-    # Keep NaNs for reporting, split dataframe into two dataframes based on cutoffs
-    nans = df[df.isnull().any(axis=1)]
+    # Get rid of NaN data
     df = df.dropna()
-    sig = df[(df[y_colname] <= p_value) & (np.abs(df[x_colname]) >= log2_fc)]
-    insig = df[~(df[y_colname] <= p_value) | ~(np.abs(df[x_colname]) >= log2_fc)]
 
-    max_y = np.max(sig['-log10(p)'])
+    # Convert cutoffs to logspace
+    log2_fc = np.log2(fc)
+    log10_pval = -np.log10(p_value)
+
+    # Split data into above and below cutoff dataframes
+    sig = df[(df[y_colname] >= log10_pval) & (np.abs(df[x_colname]) >= log2_fc)]
+    insig = df[~(df[y_colname] >= log10_pval) | ~(np.abs(df[x_colname]) >= log2_fc)]
+
+    # Get maximum values for formatting latter
+    max_y = np.max(sig[y_colname])
     max_x = np.ceil(np.max(np.abs(sig[x_colname])))
 
-    # Change number of ticks if necessary
-    if max_x <= 10:
-        rounded_lim = int(2 * np.floor(max_x/2))
-        xticks = np.arange(-rounded_lim, rounded_lim+2, 2)
-
     fig, ax = plt.subplots(figsize=(10, 10))
+
     # Split top data points if requested
     if top_n:
-        ascending = True if top_by == 'adj.P.Val' else False
-        sig.sort_values(top_by, ascending=ascending)
-        top_sig = sig[:top_n]
-        sig = sig[top_n:]
-        ax.plot(top_sig[x_colname], top_sig['-log10(p)'], 'o', c=Dark2_8.mpl_colors[0], ms=10, zorder=2)
-        for row in top_sig.iterrows():
-            plt.annotate(row[0], xy=(row[1]['logFC'], row[1]['-log10(p)']), fontsize=16, style='italic')
+
+        # Find points to highlight
+        sort = set()
+        if isinstance(top_by, list):
+            for col in top_by:
+                sort = sort.union(set(sig.index[np.argsort(np.abs(sig[col]))[::-1]][:top_n].values))
+        elif isinstance(top_by, str):
+            sort = sort.union(set(sig.index[np.argsort(np.abs(sig[top_by]))[::-1]][:top_n].values))
+        else:
+            raise ValueError('top_by must be a string or list of values found in the DataFrame used for the plot')
+
+        top_sig = sig.loc[sort]
+        sig = sig.drop(sort)
+        ax.plot(top_sig[x_colname], top_sig[y_colname], 'o', c=_colors[0], ms=10, zorder=2, label='Top Genes')
+
+        if show_labels:
+            fs = mpl.rcParams['legend.fontsize']
+            for row in top_sig.iterrows():
+                ax.annotate(row[0], xy=(row[1]['logFC'], row[1][y_colname]), fontsize=fs, style='italic')
+
     # Make plot
-    ax.plot(sig[x_colname], sig['-log10(p)'], 'o', c=Dark2_8.mpl_colors[2], ms=10, zorder=1)
-    ax.plot(insig[x_colname], insig['-log10(p)'], 'o', c=Dark2_8.mpl_colors[-1], ms=10, zorder=0, mew=0)
+    ax.plot(sig[x_colname], sig[y_colname], 'o', c=_colors[2], ms=10, zorder=1, label='Diff Exp')
+    ax.plot(insig[x_colname], insig[y_colname], 'o', c=_colors[-1], ms=10, zorder=0, mew=0, label='')
 
     # Adjust axes
     ax.set_xlim([-max_x, max_x])
@@ -48,12 +74,52 @@ def volcano_plot(df, p_value=0.05, log2_fc=1, x_colname='logFC', y_colname='adj.
 
     # Add cutoff lines
     if cutoff_lines:
-        color = Dark2_8.mpl_colors[1]
-        ax.plot([-max_x, max_x], [-np.log10(p_value), -np.log10(p_value)], '--', c=color, lw=3)
+        color = _colors[1]
+        # P value line
+
+        ax.plot([-max_x, max_x], [log10_pval, log10_pval], '--', c=color, lw=3, label='Threshold')
+
+        # log fold change lines
         ax.plot([-log2_fc, -log2_fc], [0, max_y], '--', c=color, lw=3)
         ax.plot([log2_fc, log2_fc], [0, max_y], '--', c=color, lw=3)
 
-    ax.tick_params(axis='both', which='major', labelsize=24)
-    ax.set_xlabel(r'$log_2(\frac{KO}{WT})$', fontsize=28)
-    ax.set_ylabel(r'$-log_{10}$(corrected p-value)', fontsize=28)
+    ax.legend(loc='best', numpoints=1)
+
+    # Adjust labels
+    ax.tick_params(axis='both', which='major')
+    ax.set_xlabel(r'$log_2(\frac{KO}{WT})$')
+    ax.set_ylabel(r'$-log_{10}$(corrected p-value)')
+    plt.show()
+
+
+def add_ts(ax, data, name, mean_line_dict=None, fill_dict=None):
+    if mean_line_dict is None:
+        mean_line_dict = dict()
+    if fill_dict is None:
+        fill_dict = dict()
+    mean_defaults = dict(ls='-', marker='o', lw=2, mew=0, label=name)
+    mean_kwargs = dict(mean_defaults, **mean_line_dict)
+    mean_line, = ax.plot(data[0], data[1], **mean_kwargs)
+    mean_color = mean_line.get_color()
+
+    fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.5)
+    fill_kwargs = dict(fill_defaults, **fill_dict)
+    ax.fill_between(data[0], data[1] - data[2], data[1] + data[2], **fill_kwargs)
+
+
+def tsplot(df, supergroup='condition', subgroup='time'):
+    gene = df.name
+    supers = set(df.index.get_level_values(supergroup))
+    fig, ax = plt.subplots()
+    ax.set_prop_cycle(cycler('color', _colors))
+    for sup in supers:
+        grouped_data = df.loc[sup].reset_index().groupby(subgroup)
+        grouped_stats = np.array([[g, np.mean(data[gene]), stats.sem(data[gene])] for g, data in grouped_data]).T
+        add_ts(ax, grouped_stats, sup)
+    ax.set_xlim([np.min(grouped_stats[0]), np.max(grouped_stats[0])])
+    ax.legend(loc='best', numpoints=1)
+    ax.set_xlabel(subgroup.title())
+    ax.set_ylabel('Expression')
+    ax.set_title(gene)
+    plt.tight_layout()
     plt.show()

@@ -1,8 +1,6 @@
 import sys, warnings
 import pandas as pd
-import numpy as np
-from pydiffexp import DEAnalysis, volcano_plot
-
+from pydiffexp import DEAnalysis, volcano_plot, tsplot
 
 # Variables
 test_path = "/Users/jfinkle/Documents/Northwestern/MoDyLS/Python/sprouty/data/raw_data/all_data_formatted.csv"
@@ -20,4 +18,8 @@ c_string = "KO_0-WT_0"
 
 dea.fit(c_string)
 
-volcano_plot(dea.results, top_n=10)
+# volcano_plot(dea.results, top_n=10, top_by=['logFC', '-log10p'], show_labels=True)
+
+data = dea.data.loc['ANGPTL4']
+tsplot(data)
+

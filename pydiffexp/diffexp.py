@@ -22,7 +22,7 @@ def is_multiindex(df):
     return tuple(mi)
 
 
-def make_hierarchical(df, index_names=None, split_str='_'):
+def make_hierarchical(df, index_names=None, split_str='_') -> pd.DataFrame:
     """
 
     Parameters
@@ -61,6 +61,14 @@ def make_hierarchical(df, index_names=None, split_str='_'):
     return h_df
 
 
+def str_convert(s):
+    try:
+        s = int(s)
+    except ValueError:
+        pass
+    return s
+
+
 def split_index(index, split_str):
     """
     Split a list of strings into a list of tuples.
@@ -68,7 +76,7 @@ def split_index(index, split_str):
     :param split_str: str; substring by which to split each string
     :return:
     """
-    s_index = [tuple(ind.split(split_str)) for ind in index if split_str in ind]
+    s_index = [tuple(map(str_convert, ind.split(split_str))) for ind in index if split_str in ind]
     if len(s_index) != len(index):
         raise ValueError('Index not split properly using supplied string')
     return s_index
@@ -80,16 +88,17 @@ class DEAnalysis(object):
     """
 
     def __init__(self, df=None, index_names=None, split_str='_', reference_labels=None):
-        self.data = None
+
+        self.data = None                    # type: pd.DataFrame
         self.sample_labels = None
         self.contrasts = None
-        self.experiment_summary = None
-        self.design = None
-        self.data_matrix = None
-        self.contrast_robj = None
-        self.l_fit = None
-        self.de_fit = None
-        self.results = None
+        self.experiment_summary = None      # type: pd.DataFrame
+        self.design = None                  # type: robjects.vectors.Matrix
+        self.data_matrix = None             # type: robjects.vectors.Matrix
+        self.contrast_robj = None           # type: robjects.vectors.Matrix
+        self.l_fit = None                   # type: robjects.vectors.ListVector
+        self.de_fit = None                  # type: robjects.vectors.ListVector
+        self.results = None                 # type: pd.DataFrame
 
         if df is not None:
             self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels)
@@ -116,7 +125,10 @@ class DEAnalysis(object):
             if sum(multiindex) == 0:
                 raise ValueError('No valid multiindex was found, and once could not be created')
 
+        h_df.sort_index(axis=1, inplace=True)
         self.data = h_df
+        # Sort multiindex
+
         self.experiment_summary = self.get_experiment_summary(reference_labels=reference_labels)
 
     def get_experiment_summary(self, reference_labels=None):
@@ -127,7 +139,7 @@ class DEAnalysis(object):
         index = self.data.columns
         summary_df = pd.DataFrame()
         for ii, name in enumerate(index.names):
-            summary_df[name] = index.levels[ii].values[index.labels[ii]]
+            summary_df[name] = index.levels[ii].values[index.labels[ii]].astype(str)
         if reference_labels is not None:
             summary_df['sample_id'], self.sample_labels = self.make_sample_ids(summary_df,
                                                                                reference_labels=reference_labels)
@@ -240,7 +252,7 @@ class DEAnalysis(object):
         bayes_fit = self.limma.eBayes(contrast_fit)
         return bayes_fit
 
-    def get_results(self, use_fstat=None, p_value=0.05, n='inf', **kwargs):
+    def get_results(self, use_fstat=None, p_value=0.05, n='inf', **kwargs) -> pd.DataFrame:
         """
         Print get_results of differential expression analysis
         :param use_fstat: bool; select genes using F-statistic. Useful if testing significance for multiple contrasts,
@@ -268,7 +280,12 @@ class DEAnalysis(object):
             table = self.limma.topTable(self.de_fit, **kwargs)
 
         with localconverter(default_converter + pandas2ri.converter) as cv:
-            df = pandas2ri.ri2py(table)
+            df = pandas2ri.ri2py(table)     # type: pd.DataFrame
+
+        # Rename the column and add the negative log10 values
+        df.rename(columns={'adj.P.Val': 'adj_pval', 'P.Value': 'pval'}, inplace=True)
+        df['-log10p'] = -np.log10(df['adj_pval'])
+
         return df
 
     def fit(self, contrasts):
