@@ -123,8 +123,3 @@ def tsplot(df, supergroup='condition', subgroup='time'):
     ax.set_title(gene)
     plt.tight_layout()
     plt.show()
-
-    sys.exit()
-    sem = stats.sem(data)
-    plt.plot(data)
-    # plt.show()
