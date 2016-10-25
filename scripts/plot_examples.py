@@ -21,7 +21,9 @@ dea.fit(c_string)
 
 # volcano_plot(dea.results, top_n=10, top_by=['logFC', '-log10p'], show_labels=True)
 
-data = dea.data.iloc[random.randint(0, len(dea.data))]
+# data = dea.data.iloc[random.randint(0, len(dea.data))]
+data = dea.data.loc['SPRY4']
+# data = dea.data.loc['FSCN1']
 # data = dea.data.loc['OTTMUSG00000000720']
 tsplot(data)
 
