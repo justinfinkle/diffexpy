@@ -1,5 +1,6 @@
 import sys, warnings
 import pandas as pd
+import random
 from pydiffexp import DEAnalysis, volcano_plot, tsplot
 
 # Variables
@@ -20,6 +21,7 @@ dea.fit(c_string)
 
 # volcano_plot(dea.results, top_n=10, top_by=['logFC', '-log10p'], show_labels=True)
 
-data = dea.data.loc['ANGPTL4']
+data = dea.data.iloc[random.randint(0, len(dea.data))]
+# data = dea.data.loc['OTTMUSG00000000720']
 tsplot(data)
 

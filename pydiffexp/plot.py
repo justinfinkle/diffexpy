@@ -6,6 +6,7 @@ from cycler import cycler
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import plot, fill_between
 import matplotlib as mpl
+
 import palettable.colorbrewer as cbrewer
 
 # Set plot defaults
@@ -92,19 +93,26 @@ def volcano_plot(df: pd.DataFrame, p_value: float=0.05, fc=2, x_colname='logFC',
     plt.show()
 
 
-def add_ts(ax, data, name, mean_line_dict=None, fill_dict=None):
+def add_ts(ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None):
+    gene = data.name
+    data = data.reset_index()
+    grouped_data = data.groupby(subgroup)
+    grouped_stats = np.array([[g, np.mean(data[gene]), stats.sem(data[gene])] for g, data in grouped_data]).T
     if mean_line_dict is None:
         mean_line_dict = dict()
     if fill_dict is None:
         fill_dict = dict()
-    mean_defaults = dict(ls='-', marker='o', lw=2, mew=0, label=name)
+    mean_defaults = dict(ls='-', marker='s', lw=2, mew=0, label=name, ms=10, zorder=0)
     mean_kwargs = dict(mean_defaults, **mean_line_dict)
-    mean_line, = ax.plot(data[0], data[1], **mean_kwargs)
+    mean_line, = ax.plot(grouped_stats[0], grouped_stats[1], **mean_kwargs)
     mean_color = mean_line.get_color()
+    jitter_x = data[subgroup]#+(np.random.normal(0, 1, len(data)))
+    ax.plot(jitter_x, data[gene], '.', color=mean_color, ms=15, label='', alpha=0.5)
 
-    fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.5)
+    fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.2, label='sem')
     fill_kwargs = dict(fill_defaults, **fill_dict)
-    ax.fill_between(data[0], data[1] - data[2], data[1] + data[2], **fill_kwargs)
+    ax.fill_between(grouped_stats[0], grouped_stats[1] - grouped_stats[2], grouped_stats[1] + grouped_stats[2],
+                    **fill_kwargs)
 
 
 def tsplot(df, supergroup='condition', subgroup='time'):
@@ -113,11 +121,11 @@ def tsplot(df, supergroup='condition', subgroup='time'):
     fig, ax = plt.subplots()
     ax.set_prop_cycle(cycler('color', _colors))
     for sup in supers:
-        grouped_data = df.loc[sup].reset_index().groupby(subgroup)
-        grouped_stats = np.array([[g, np.mean(data[gene]), stats.sem(data[gene])] for g, data in grouped_data]).T
-        add_ts(ax, grouped_stats, sup)
-    ax.set_xlim([np.min(grouped_stats[0]), np.max(grouped_stats[0])])
+        sup_data = df.loc[sup]
+        add_ts(ax, sup_data, sup, subgroup=subgroup)
+    # ax.set_xlim([np.min(grouped_stats[0]), np.max(grouped_stats[0])])
     ax.legend(loc='best', numpoints=1)
+    ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda x, p: '{:,}'.format(x)))
     ax.set_xlabel(subgroup.title())
     ax.set_ylabel('Expression')
     ax.set_title(gene)
