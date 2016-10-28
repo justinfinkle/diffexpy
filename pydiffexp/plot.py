@@ -63,7 +63,7 @@ def volcano_plot(df: pd.DataFrame, p_value: float=0.05, fc=2, x_colname='logFC',
         if show_labels:
             fs = mpl.rcParams['legend.fontsize']
             for row in top_sig.iterrows():
-                ax.annotate(row[0], xy=(row[1]['logFC'], row[1][y_colname]), fontsize=fs, style='italic')
+                ax.annotate(row[0], xy=(row[1][x_colname], row[1][y_colname]), fontsize=fs, style='italic')
 
     # Make plot
     ax.plot(sig[x_colname], sig[y_colname], 'o', c=_colors[2], ms=10, zorder=1, label='Diff Exp')

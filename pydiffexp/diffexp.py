@@ -1,4 +1,4 @@
-import os, sys, itertools, warnings
+import os, sys, itertools, warnings, collections
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -99,6 +99,7 @@ class DEAnalysis(object):
         self.l_fit = None                   # type: robjects.vectors.ListVector
         self.de_fit = None                  # type: robjects.vectors.ListVector
         self.results = None                 # type: pd.DataFrame
+        self.decide = None                  # type: pd.DataFrame
 
         if df is not None:
             self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels)
@@ -252,6 +253,14 @@ class DEAnalysis(object):
         bayes_fit = self.limma.eBayes(contrast_fit)
         return bayes_fit
 
+    def _decide_tests(self, fit_obj, method='global', **kwargs):
+        # Run decide tests
+        decide = self.limma.decideTests(fit_obj, method=method, **kwargs)
+
+        # Convert to dataframe
+        df = pd.DataFrame(np.array(decide), index=decide.rownames, columns=decide.colnames)
+        return df
+
     def get_results(self, use_fstat=None, p_value=0.05, n='inf', **kwargs) -> pd.DataFrame:
         """
         Print get_results of differential expression analysis
@@ -308,6 +317,7 @@ class DEAnalysis(object):
         # Perform a linear fit, then empirical bayes fit
         self.l_fit = self.limma.lmFit(self.data_matrix, self.design)
         self.de_fit = self._ebayes(self.l_fit, self.contrast_robj)
+        self.decide = self._decide_tests(self.de_fit)
 
         # Set results to include all test values
         self.results = self.get_results(p_value=np.inf)
