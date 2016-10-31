@@ -1,4 +1,4 @@
-from .diffexp import DEAnalysis
-from .discretized_clustering import *
+from .legacy import *
 from .diffexp import *
+from .diffexp import DEAnalysis
 from .plot import *

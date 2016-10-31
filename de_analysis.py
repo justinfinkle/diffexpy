@@ -196,7 +196,7 @@ class DEAnalysis(object):
     def replicate_correlation(self, condition, data_dict):
         pair_combos = itertools.combinations(self.replicate_set, 2)
         pearson_df = None
-        print 'Calculating pearson correlation for replicates in %s...'%condition,
+        print('Calculating pearson correlation for replicates in %s...'%condition)
         for combo in pair_combos:
             p = self.pearson_correlation(data_dict[combo[0]].values, data_dict[combo[1]].values)
             if pearson_df is None:

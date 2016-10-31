@@ -1,12 +1,13 @@
-import os
-import sys
 import functools
-import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
-from pydiffexp import discretized_clustering as dcluster
-from matplotlib.colors import ColorConverter
+import os, sys
 import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import pickle
+
+import de_analysis
+import discretized_clustering as dcluster
 
 
 def is_square(n):
@@ -62,9 +63,9 @@ def calc_subplot_dimensions(x):
 if __name__ == '__main__':
 
     # Getting data files.
-    directory = '../'
+    directory = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Python/sprouty/'
     dea_path = directory + 'data/pickles/protocol_2_de_analysis_full_BGcorrected.pickle'
-    dc_path = '../data/pickles/'
+    dc_path = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Python/sprouty/data/pickles/'
     r_results_path_diff = directory + 'clustering/expression_change_diff/'
     r_results_path = directory + 'clustering/expression_change/'
     fdr = 0.05
@@ -96,30 +97,28 @@ if __name__ == '__main__':
     #
     dc = pd.read_pickle(pickle_string)
     #
-    # # Get differences
-    # diff = dc.cluster_dict['WT']-dc.cluster_dict['KO']
-    #
-    # # Remove ones that don't change
-    # diff = diff[(diff.T !=0).any()]
-    # print diff
-    # sys.exit()
-    #
-    # # Calculate cumulative differences
-    # wt_cum = np.cumsum(dc.cluster_dict['WT'].loc[diff.index], axis=1)
-    # ko_cum = np.cumsum(dc.cluster_dict['KO'].loc[diff.index], axis=1)
-    # cum_diff = wt_cum-ko_cum
-    #
-    # # # Plot all flows for both cases.
-    # sets = ['WT', 'KO']
-    # colors = ['m', 'c']
-    # alphas = [1.0, 0.5]
-    # paths = ['all', 'all']
-    #
-    # fig, ax = plt.subplots(figsize=(10, 7.5))
-    # dc.plot_flows(ax, ['diff'], colors, alphas, paths, x_coords=dc.times, min_sw=0.01, max_sw=1, uniform=False, path_df=diff)
-    # plt.show()
-    # sys.exit()
-    #
+    # Get differences
+    diff = dc.cluster_dict['WT']-dc.cluster_dict['KO']
+
+    # Remove ones that don't change
+    diff = diff[(diff.T !=0).any()]
+
+    # Calculate cumulative differences
+    wt_cum = np.cumsum(dc.cluster_dict['WT'].loc[diff.index], axis=1)
+    ko_cum = np.cumsum(dc.cluster_dict['KO'].loc[diff.index], axis=1)
+    cum_diff = wt_cum-ko_cum
+
+    # # Plot all flows for both cases.
+    sets = ['WT', 'KO']
+    colors = ['m', 'c']
+    alphas = [1.0, 0.5]
+    paths = ['all', 'all']
+
+    fig, ax = plt.subplots(figsize=(10, 7.5))
+    dc.plot_flows(ax, ['diff'], colors, alphas, paths, x_coords=dc.times, min_sw=0.01, max_sw=1, uniform=False, path_df=diff)
+    plt.show()
+    sys.exit()
+
     # dc.plot_flows(ax, sets, colors, alphas, paths, x_coords=dc.times, min_sw=0.01, max_sw=1, uniform=False)
     #
     # background = np.array((0.5, 0.5, 0.5))

@@ -9,7 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.path import Path
-import fisher_test as ft
+from pydiffexp.legacy import fisher_test as ft
 from de_analysis import DEAnalysis
 from collections import Counter
 
@@ -110,7 +110,7 @@ def binary_to_growing_path(step_list, df, joiner=''):
 def find_genes_in_path(growing_path_df, stepwise_path_combos, gene_dict):
 
     path_dictionary = {}
-    for step, series in growing_path_df.iteritems():
+    for step, series in growing_path_df.items():
         path_set = set(series)
         path_dictionary[step] = {}
         genes_in_step = 0
@@ -133,8 +133,8 @@ def find_path_enrichment(path_dictionary, fdr=0.01):
     print("Searching for enrichment...")
     enriched_path_list = []
     enrichment_table_list = []
-    for step, paths in path_dictionary.iteritems():
-        for path, value in paths.iteritems():
+    for step, paths in path_dictionary.items():
+        for path, value in paths.items():
             study_tfs = value['tfs']
             alts = value['alt_paths']
             # enriched_tfs = []
@@ -295,11 +295,11 @@ class DiscretizedClusterer(object):
         results_dict = None
         if self.limma_results is not None:
             # Initialize the results
-            results_index = self.limma_results.itervalues().next().sort_index().index
+            results_index = next(iter(self.limma_results.values())).sort_index().index
             results_dict = {condition: pd.DataFrame([], index=results_index) for condition in self.conditions}
 
             # Assign each gene to a cluster
-            for key, df in self.limma_results.iteritems():
+            for key, df in self.limma_results.items():
 
                 # Get information to place in the appropriate dataframe
                 key_split = re.split(r"[_-]+", key)
@@ -327,7 +327,7 @@ class DiscretizedClusterer(object):
         except KeyError:
             keep_gene = ((results_dict['diff'].T != 0).any()).values
 
-        for key in results_dict.iterkeys():
+        for key in results_dict.keys():
             results_dict[key][0] = 0
             results_dict[key].sort_index(axis=1, inplace=True, ascending=True)
             results_dict[key] = results_dict[key][keep_gene]
@@ -399,7 +399,7 @@ class DiscretizedClusterer(object):
 
         # Create dictionary mapping step to list of (level in, level out) to normalized flow.
         flow_dict = {step: {key: (max((value / norm), min_sw), (1 if path == 'all' else 0)) for key, value in
-                            Counter(zip(dc_array[:, step], dc_array[:, step + 1])).iteritems()}
+                            Counter(zip(dc_array[:, step], dc_array[:, step + 1])).items()}
                      for step in range(0, dc_array.shape[1] - 1)}
         # Adjust flow_dictionary to mark specific segments as not displayed.
         if path != 'all':
@@ -434,13 +434,13 @@ class DiscretizedClusterer(object):
 
         # Iterate through each entry in the flow dictionary.
         nodes = {}
-        for step, seg_dict in flow_dict.iteritems():
+        for step, seg_dict in flow_dict.items():
             levels = set([seg[0] for seg in seg_dict.keys()])
             if step == len(x_coords)-2:
                 levels = levels.union(set([seg[1] for seg in seg_dict.keys()]))
 
             for level in levels:
-                for i, h in self.calc_height(flow_dict, seg_dict, step, level).iteritems():
+                for i, h in self.calc_height(flow_dict, seg_dict, step, level).items():
                     offset = self.calc_offset(flow_dict, nodes, step + i, level, h)
                     nodes[(step + i, level)] = patches.Polygon(
                         self.make_node_points(x_coords[step + i], level + offset, h, node_width),
@@ -468,16 +468,16 @@ class DiscretizedClusterer(object):
         if x == 0:
             heights[0] = np.sum([np.abs(x) for (x, y) in seg_dict.values()])
         else:
-            h_in = np.sum([np.abs(flow[0]) for seg, flow in flow_dict[x - 1].iteritems() if seg[1] == y])
-            h_out = np.sum([np.abs(flow[0]) for seg, flow in flow_dict[x].iteritems() if seg[0] == y])
+            h_in = np.sum([np.abs(flow[0]) for seg, flow in flow_dict[x - 1].items() if seg[1] == y])
+            h_out = np.sum([np.abs(flow[0]) for seg, flow in flow_dict[x].items() if seg[0] == y])
             heights[0] = max(h_in, h_out)
 
             # Old method
-            # heights[0] = np.sum([flow[0] for seg, flow in flow_dict[x - 1].iteritems() if seg[1] == y])
+            # heights[0] = np.sum([flow[0] for seg, flow in flow_dict[x - 1].items() if seg[1] == y])
 
             # Additional heights for ending nodes.
             if x == 3:
-                heights[1] = np.sum([np.abs(flow[0]) for seg, flow in flow_dict[x].iteritems() if seg[1] == y])
+                heights[1] = np.sum([np.abs(flow[0]) for seg, flow in flow_dict[x].items() if seg[1] == y])
 
         return heights
 
@@ -501,7 +501,7 @@ class DiscretizedClusterer(object):
                 y1 = prev_node.xy[0][1]  # get lower y coordinate of previous node
                 y1_flow = flow_dict[x - 1][(y, y - 1)][0]  # flow leaving down from previous node
                 y2 = y - height / 2  # get lower y coordinate of current node
-                y2_flow = np.sum([np.abs(flow[0]) for seg, flow in flow_dict[x - 1].iteritems()
+                y2_flow = np.sum([np.abs(flow[0]) for seg, flow in flow_dict[x - 1].items()
                                   if seg[0] < y and seg[1] == y])  # flow entering up from previous node
                 return (y1 + y1_flow) - (y2 + y2_flow)
             except:
@@ -558,8 +558,8 @@ class DiscretizedClusterer(object):
             display = {0: 'none', 1: flow_color}
         polys = {}
 
-        for step, seg_dict in flow_dict.iteritems():
-            for seg, flow in seg_dict.iteritems():
+        for step, seg_dict in flow_dict.items():
+            for seg, flow in seg_dict.items():
                 level = seg[0]
                 mass = np.abs(flow[0])
 
@@ -713,6 +713,7 @@ class DiscretizedClusterer(object):
             ax.set_xticklabels(np.sort(self.times))
         else:
             ax.set_xticks(self.times)
+        x_coords = list(x_coords)
 
         # Scale node width
         if node_width is None:
