@@ -19,12 +19,15 @@ dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition',
 # Types of contrasts
 c_dict = {'Diff0': "(KO_15-KO_0)-(WT_15-WT_0)", 'Diff15': "(KO_60-KO_15)-(WT_60-WT_15)",
           'Diff60': "(KO_120-KO_60)-(WT_120-WT_60)", 'Diff120': "(KO_240-KO_120)-(WT_240-WT_120)"}
-c_list = ["KO_0-WT_0", "KO_15-WT_15", "KO_60-WT_60", "KO_120-WT_120", "KO_240-WT_240"]
+# c_list = ["KO_0-WT_0", "KO_15-WT_15", "KO_60-WT_60", "KO_120-WT_120", "KO_240-WT_240"]
+c_list = ["KO_15-KO_0", "KO_60-KO_15", "KO_120-KO_60", "KO_240-KO_120"]
 c_string = "KO_0-WT_0"
 
-dea.fit(c_string)
+dea.fit(c_list)
 
 dict_genes = dea.get_results(use_fstat=False)
+print(sum(dea.decide.all(axis=1) != 0))
+sys.exit()
 # print(dict_genes.head())
 # sys.exit()
 # for g in dict_genes.index.values[:10]:

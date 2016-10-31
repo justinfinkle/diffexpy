@@ -4,7 +4,7 @@ import functools
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-import discretized_clustering as dcluster
+from pydiffexp import discretized_clustering as dcluster
 from matplotlib.colors import ColorConverter
 import matplotlib as mpl
 

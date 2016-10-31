@@ -130,7 +130,7 @@ def find_genes_in_path(growing_path_df, stepwise_path_combos, gene_dict):
 
 
 def find_path_enrichment(path_dictionary, fdr=0.01):
-    print "Searching for enrichment..."
+    print("Searching for enrichment...")
     enriched_path_list = []
     enrichment_table_list = []
     for step, paths in path_dictionary.iteritems():
@@ -150,20 +150,20 @@ def find_path_enrichment(path_dictionary, fdr=0.01):
             # try:
             #     enriched_tfs = list(enriched_tfs[0].intersection(enriched_tfs[1]))
             if enriched_tfs:
-                print "Path enriched: ", path, enriched_tfs
+                print("Path enriched: ", path, enriched_tfs)
                 enriched_path_list.append(path)
                 enrichment_table_list.append(enriched_tfs)
             # except IndexError:
             #     continue
             # if np.sum(table['FDR_reject']) > 0:
-            #     print "Path enriched: ", path
+            #     print("Path enriched: ", path)
             #     enrichment_table_list.append(table[table['FDR_reject']].sort_values('p_bonferroni'))
             #     enriched_path_list.append(path)
     return enriched_path_list, enrichment_table_list
 
 
 def plot_enrichment_results(enriched_path_list, string_to_array_dict):
-    print len(enriched_path_list)
+    print(len(enriched_path_list))
     n_cols = int(np.floor(np.sqrt(len(enriched_path_list))))
     n_rows = int(np.ceil(np.sqrt(len(enriched_path_list))))
     # f, axarr = plt.subplots(n_rows, n_cols)
@@ -174,7 +174,7 @@ def plot_enrichment_results(enriched_path_list, string_to_array_dict):
     for ii, sig in enumerate(enriched_path_list):
         found = [string.find(sig) for string in enriched_path_list]
         if np.sum(found)>-len(enriched_path_list)+1:
-            print sig
+            print(sig)
             continue
         plot_data = string_to_array_dict[sig]
         x_ticks = range(len(plot_data))
@@ -342,7 +342,7 @@ class DiscretizedClusterer(object):
         else:
             self.fdr = fdr
         for condition in self.conditions:
-            print 'Checking enrichment for condtion: %s with FDR of %s' % (condition, str(fdr))
+            print('Checking enrichment for condtion: %s with FDR of %s' % (condition, str(fdr)))
             self.enrichment_results[condition] = {}
             times = self.cluster_dict[condition].columns.values
             steps = range(1, len(times))
@@ -354,7 +354,7 @@ class DiscretizedClusterer(object):
             path_dictionary = find_genes_in_path(growing_path, stepwise_path_combos, association_dict)
 
             sig_path_list, enrichment_tables = find_path_enrichment(path_dictionary, fdr=fdr)
-            print "%i paths with enrichment found" % len(sig_path_list)
+            print("%i paths with enrichment found" % len(sig_path_list))
             self.enrichment_results[condition]['significant_paths'] = sig_path_list
             self.enrichment_results[condition]['enrichment_tables'] = enrichment_tables
 
