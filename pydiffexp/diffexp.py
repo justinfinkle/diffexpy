@@ -1,85 +1,16 @@
-import os, sys, itertools, warnings, collections
+import os, sys, warnings
 import numpy as np
 import pandas as pd
-from scipy import stats
 import rpy2.robjects as robjects
 import rpy2.robjects.numpy2ri
 from rpy2.robjects.packages import importr
 from rpy2.robjects import pandas2ri, default_converter
 from rpy2.robjects.conversion import localconverter
+from pydiffexp.utils import int_or_float
+import pydiffexp.utils.multiindex_helpers as mi
+
+# Activate conversion
 rpy2.robjects.numpy2ri.activate()
-
-
-def is_multiindex(df):
-    """
-    Function to determine if a dataframe is multiindex
-    :param df: dataframe
-    :return: tuple
-    """
-    mi = [False, False]
-    mi[0] = True if isinstance(df.index, pd.MultiIndex) else False
-    mi[1] = True if isinstance(df.columns, pd.MultiIndex) else False
-    return tuple(mi)
-
-
-def make_hierarchical(df, index_names=None, split_str='_') -> pd.DataFrame:
-    """
-
-    Parameters
-    ----------
-    df
-    index_names
-    split_str
-
-    Returns
-    -------
-
-    """
-    """
-    Make a regular dataframe hierarchical by adding a MultiIndex
-    :param df: dataframe; the dataframe to made hierarchical
-    :param index_names: list; names for each of the categories of the multiindex
-    :param axis: int (0 or 1); axis along which to split the index into a multiindex. Default (0) splits along the dataframe index, while 1 splits along the dataframe columns
-    :param split_str: str; the string on which to split tuples
-    :return: dataframe; hierarchical dataframe with multiindex
-    """
-
-    # Split each label into hierarchy
-    try:
-        index = df.columns
-        s_index = split_index(index, split_str)
-    except ValueError:
-        df = df.T
-        index = df.columns
-        s_index = split_index(index, split_str)
-        warnings.warn('Multiindex found for rows, but not columns. Returned data frame is transposed from input')
-
-    h_df = df.copy()
-    m_index = pd.MultiIndex.from_tuples(s_index, names=index_names)
-    h_df.columns = m_index
-
-    return h_df
-
-
-def str_convert(s):
-    try:
-        s = int(s)
-    except ValueError:
-        pass
-    return s
-
-
-def split_index(index, split_str):
-    """
-    Split a list of strings into a list of tuples.
-    :param index: list-like; List of strings to be split
-    :param split_str: str; substring by which to split each string
-    :return:
-    """
-    s_index = [tuple(map(str_convert, ind.split(split_str))) for ind in index if split_str in ind]
-    if len(s_index) != len(index):
-        raise ValueError('Index not split properly using supplied string')
-    return s_index
 
 
 class DEAnalysis(object):
@@ -87,11 +18,14 @@ class DEAnalysis(object):
     An object that does differential expression analysis with time course data
     """
 
-    def __init__(self, df=None, index_names=None, split_str='_', reference_labels=None):
+    def __init__(self, df=None, index_names=None, split_str='_', time=None, condition=None,
+                 reference_labels=None):
 
         self.data = None                    # type: pd.DataFrame
         self.sample_labels = None
         self.contrasts = None
+        self.times = None                   # type: list
+        self.conditions = None              # type: list
         self.experiment_summary = None      # type: pd.DataFrame
         self.design = None                  # type: robjects.vectors.Matrix
         self.data_matrix = None             # type: robjects.vectors.Matrix
@@ -103,6 +37,8 @@ class DEAnalysis(object):
 
         if df is not None:
             self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels)
+            self.times = sorted(map(int_or_float, list(set(self.experiment_summary[time]))))
+            self.conditions = sorted(list(set(self.experiment_summary[condition])))
 
         # Import requisite R packages
         self.limma = importr('limma')
@@ -110,10 +46,10 @@ class DEAnalysis(object):
 
     def _set_data(self, df, index_names=None, split_str='_', reference_labels=None):
         # Check for a multiindex or try making one
-        multiindex = is_multiindex(df)
+        multiindex = mi.is_multiindex(df)
         h_df = None
         if sum(multiindex) == 0:
-            h_df = make_hierarchical(df, index_names=index_names, split_str=split_str)
+            h_df = mi.make_hierarchical(df, index_names=index_names, split_str=split_str)
         else:
             if multiindex[1]:
                 h_df = df.copy()
@@ -122,7 +58,7 @@ class DEAnalysis(object):
                 warnings.warn('DataFrame transposed so multiindex is along columns.')
 
             # Double check multiindex
-            multiindex = is_multiindex(h_df)
+            multiindex = mi.is_multiindex(h_df)
             if sum(multiindex) == 0:
                 raise ValueError('No valid multiindex was found, and once could not be created')
 
@@ -253,7 +189,7 @@ class DEAnalysis(object):
         bayes_fit = self.limma.eBayes(contrast_fit)
         return bayes_fit
 
-    def _decide_tests(self, fit_obj, method='global', **kwargs):
+    def decide_tests(self, fit_obj, method='global', **kwargs):
         # Run decide tests
         decide = self.limma.decideTests(fit_obj, method=method, **kwargs)
 
@@ -317,7 +253,6 @@ class DEAnalysis(object):
         # Perform a linear fit, then empirical bayes fit
         self.l_fit = self.limma.lmFit(self.data_matrix, self.design)
         self.de_fit = self._ebayes(self.l_fit, self.contrast_robj)
-        self.decide = self._decide_tests(self.de_fit)
 
         # Set results to include all test values
         self.results = self.get_results(p_value=np.inf)
