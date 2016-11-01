@@ -18,7 +18,7 @@ hierarchy = ['condition', 'well', 'time', 'replicate']
 
 raw_data[raw_data <= 0] = 1
 dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition', 'time'], time='time', condition='condition')
-print(dea.times)
+print(dea.timeseries)
 sys.exit()
 
 # Types of contrasts

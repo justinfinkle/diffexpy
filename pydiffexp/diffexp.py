@@ -6,7 +6,7 @@ import rpy2.robjects.numpy2ri
 from rpy2.robjects.packages import importr
 from rpy2.robjects import pandas2ri, default_converter
 from rpy2.robjects.conversion import localconverter
-from pydiffexp.utils import int_or_float
+from pydiffexp.utils.utils import int_or_float, filter_value
 import pydiffexp.utils.multiindex_helpers as mi
 
 # Activate conversion
@@ -26,6 +26,7 @@ class DEAnalysis(object):
         self.contrasts = None
         self.times = None                   # type: list
         self.conditions = None              # type: list
+        self.timeseries = False             # type: bool
         self.experiment_summary = None      # type: pd.DataFrame
         self.design = None                  # type: robjects.vectors.Matrix
         self.data_matrix = None             # type: robjects.vectors.Matrix
@@ -37,8 +38,12 @@ class DEAnalysis(object):
 
         if df is not None:
             self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels)
-            self.times = sorted(map(int_or_float, list(set(self.experiment_summary[time]))))
+            if time is not None:
+                self.times = sorted(map(int_or_float, list(set(self.experiment_summary[time]))))
+                if len(self.times) > 1:
+                    self.timeseries = True
             self.conditions = sorted(list(set(self.experiment_summary[condition])))
+
 
         # Import requisite R packages
         self.limma = importr('limma')
