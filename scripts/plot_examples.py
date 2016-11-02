@@ -18,8 +18,6 @@ hierarchy = ['condition', 'well', 'time', 'replicate']
 
 raw_data[raw_data <= 0] = 1
 dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition', 'time'], time='time', condition='condition')
-print(dea.timeseries)
-sys.exit()
 
 # Types of contrasts
 c_dict = {'Diff0': "(KO_15-KO_0)-(WT_15-WT_0)", 'Diff15': "(KO_60-KO_15)-(WT_60-WT_15)",
@@ -30,6 +28,8 @@ c_list = ["WT_15-WT_0", "WT_60-WT_15", "WT_120-WT_60", "WT_240-WT_120"]
 # c_string = "KO_0-WT_0"
 
 dea.fit(c_list)
+dea.suggest_contrasts()
+sys.exit()
 dict_genes = dea.get_results(use_fstat=False)
 
 dc = dcluster.DiscretizedClusterer()

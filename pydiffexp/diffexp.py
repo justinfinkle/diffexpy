@@ -1,4 +1,4 @@
-import os, sys, warnings
+import os, sys, warnings, itertools
 import numpy as np
 import pandas as pd
 import rpy2.robjects as robjects
@@ -6,8 +6,10 @@ import rpy2.robjects.numpy2ri
 from rpy2.robjects.packages import importr
 from rpy2.robjects import pandas2ri, default_converter
 from rpy2.robjects.conversion import localconverter
-from pydiffexp.utils.utils import int_or_float, filter_value
+from pydiffexp.utils.utils import int_or_float, filter_value, grepl, contrast_map
 import pydiffexp.utils.multiindex_helpers as mi
+from natsort import natsorted
+from collections import deque
 
 # Activate conversion
 rpy2.robjects.numpy2ri.activate()
@@ -22,11 +24,13 @@ class DEAnalysis(object):
                  reference_labels=None):
 
         self.data = None                    # type: pd.DataFrame
-        self.sample_labels = None
+        self.labels = None
         self.contrasts = None
         self.times = None                   # type: list
         self.conditions = None              # type: list
+        self.expected_contrasts = None
         self.timeseries = False             # type: bool
+        self.samples = None                 # type: list
         self.experiment_summary = None      # type: pd.DataFrame
         self.design = None                  # type: robjects.vectors.Matrix
         self.data_matrix = None             # type: robjects.vectors.Matrix
@@ -43,7 +47,7 @@ class DEAnalysis(object):
                 if len(self.times) > 1:
                     self.timeseries = True
             self.conditions = sorted(list(set(self.experiment_summary[condition])))
-
+            self.expected_contrasts = self.possible_contrasts()
 
         # Import requisite R packages
         self.limma = importr('limma')
@@ -83,13 +87,49 @@ class DEAnalysis(object):
         for ii, name in enumerate(index.names):
             summary_df[name] = index.levels[ii].values[index.labels[ii]].astype(str)
         if reference_labels is not None:
-            summary_df['sample_id'], self.sample_labels = self.make_sample_ids(summary_df,
-                                                                               reference_labels=reference_labels)
+            summary_df['sample_id'], self.labels, self.samples = self.make_sample_ids(summary_df,
+                                                                                      reference_labels=reference_labels)
         else:
             warnings.warn('Sample IDs and labels not set because no reference labels supplied. R data matrix and '
                           'contrasts cannot be created without sample IDs. Setting sample labels to integers')
-            self.sample_labels = list(map(lambda x: 'x%i' % x, range(len(summary_df))))
+            self.labels = list(map(lambda x: 'x%i' % x, range(len(summary_df))))
         return summary_df
+
+    def possible_contrasts(self):
+        """
+        Make a list of expected contrasts based on times and conditions
+        :return:
+        """
+        if self.timeseries:
+            conditions_permutes = list(itertools.product(self.conditions, repeat=2))
+            contrasts = {}
+            for c in conditions_permutes:
+                if c[0] == c[1]:
+                    x = c[0]
+                    samples = grepl(self.samples, x)
+                    contrasts[str(x) + '_ts'] = (list(map('-'.join, zip(samples[1:], samples[:-1]))))
+                else:
+                    contrasts[c[0] + '-' + c[1]] = list(
+                        map('-'.join, zip(grepl(self.samples, c[0]), grepl(self.samples, c[1]))))
+            diffs = list(itertools.permutations(grepl(contrasts.keys(), '_ts'), 2))
+            for diff in diffs:
+                ts1 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[0]]))
+                ts2 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[1]]))
+                contrasts['-'.join(diff)] = {ii: contrast for ii, contrast in enumerate(map('-'.join, zip(ts1, ts2)))}
+            expected_contrasts = contrasts
+        else:
+            expected_contrasts = list(map('-'.join, itertools.permutations(self.conditions, 2)))
+        return expected_contrasts
+
+    def suggest_contrasts(self):
+        print('Timeseries Data:', self.timeseries)
+        if isinstance(self.expected_contrasts, dict):
+            sorted_keys = sorted(self.expected_contrasts.keys())
+            for k in sorted_keys:
+                print(k+":", self.expected_contrasts[k])
+        elif isinstance(self.expected_contrasts, list):
+            for c in self.expected_contrasts:
+                print(c)
 
     @staticmethod
     def make_sample_ids(summary, reference_labels):
@@ -105,9 +145,9 @@ class DEAnalysis(object):
                              % ', '.join(ref_not_in_summary))
         # Make unique combinations from the reference labels
         combos = ['_'.join(combo) for combo in summary.loc[:, reference_labels].values.tolist()]
-        combo_set = sorted(list(set(combos)))
+        combo_set = natsorted(list(set(combos)))
         ids = [combo_set.index(combo) for combo in combos]
-        return ids, combos
+        return ids, combos, combo_set
 
     def print_experiment_summary(self, verbose=False):
         """
@@ -133,7 +173,7 @@ class DEAnalysis(object):
         :return:    R-matrix
         """
         # Make an robject for the model matrix
-        r_sample_labels = robjects.FactorVector(self.sample_labels)
+        r_sample_labels = robjects.FactorVector(self.labels)
 
         # Create R formula object, and change the environment variable
         fmla = robjects.Formula(formula)
@@ -141,7 +181,7 @@ class DEAnalysis(object):
 
         # Make the design matrix. self.stats is a bound R package
         design = self.stats.model_matrix(fmla)
-        design.colnames = robjects.StrVector(sorted(list(set(self.sample_labels))))
+        design.colnames = robjects.StrVector(sorted(list(set(self.labels))))
         return design
 
     def _make_data_matrix(self):
@@ -161,7 +201,7 @@ class DEAnalysis(object):
         # Make r matrix object
         nr, nc = data.shape
         r_matrix = robjects.r.matrix(data, nrow=nr, ncol=nc)
-        r_matrix.colnames = robjects.StrVector(self.sample_labels)
+        r_matrix.colnames = robjects.StrVector(self.labels)
         r_matrix.rownames = robjects.StrVector(genes)
         return r_matrix
 
@@ -199,7 +239,7 @@ class DEAnalysis(object):
         decide = self.limma.decideTests(fit_obj, method=method, **kwargs)
 
         # Convert to dataframe
-        df = pd.DataFrame(np.array(decide), index=decide.rownames, columns=decide.colnames)
+        df = pd.DataFrame(np.array(decide), index=decide.rownames, columns=decide.colnames).astype(int)
         return df
 
     def get_results(self, use_fstat=None, p_value=0.05, n='inf', **kwargs) -> pd.DataFrame:
@@ -237,6 +277,10 @@ class DEAnalysis(object):
         df['-log10p'] = -np.log10(df['adj_pval'])
 
         return df
+
+    def cluster_trajectories(self):
+        trajectory = self.decide_tests(self.de_fit)
+        return trajectory
 
     def fit(self, contrasts):
         """

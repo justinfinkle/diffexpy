@@ -11,6 +11,14 @@ def str_convert(s):
     return s
 
 
+def contrast_map(x, t1, t2=None):
+    # x is a tuple of conditions
+    x = list(map(str, x))
+    if t2 is None:
+        t2 = t1
+    return x[0]+"_"+str(t1)+"-"+x[1]+"_"+str(t2)
+
+
 def int_or_float(s):
     # Note: this is probably not a safe method for complex inputs
     r = float(s) if int(s) < float(s) else int(s)
