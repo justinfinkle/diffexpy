@@ -27,9 +27,9 @@ def int_or_float(s):
 
 def filter_value(x, value, axis=0, criteria='all'):
     if criteria == 'all':
-        x = x[x.all(axis=axis) == value]
+        x = x[~(x == value).all(axis=axis)]
 
     elif criteria == 'any':
-        x = x[x.any(axis=axis) == value]
+        x = x[~(x == value).any(axis=axis)]
 
     return x
