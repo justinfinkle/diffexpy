@@ -1,15 +1,18 @@
 import os, sys, warnings, itertools
+from collections import Counter
 import numpy as np
 import pandas as pd
 import rpy2.robjects as robjects
 import rpy2.robjects.numpy2ri
+from scipy.stats import zscore
 from rpy2.robjects.packages import importr
 from rpy2.robjects import pandas2ri, default_converter
 from rpy2.robjects.conversion import localconverter
 from pydiffexp.utils.utils import int_or_float, filter_value, grepl, contrast_map
 import pydiffexp.utils.multiindex_helpers as mi
 from natsort import natsorted
-from collections import deque
+
+import matplotlib.pyplot as plt
 
 # Activate conversion
 rpy2.robjects.numpy2ri.activate()
@@ -20,14 +23,15 @@ class DEAnalysis(object):
     An object that does differential expression analysis with time course data
     """
 
-    def __init__(self, df=None, index_names=None, split_str='_', time=None, condition=None,
-                 reference_labels=None):
+    def __init__(self, df=None, index_names=None, split_str='_', time='time', condition='condition',
+                 replicate='replicate', reference_labels=None):
 
         self.data = None                    # type: pd.DataFrame
         self.labels = None
         self.contrasts = None
         self.times = None                   # type: list
         self.conditions = None              # type: list
+        self.replicates = None              # type: list
         self.expected_contrasts = None
         self.timeseries = False             # type: bool
         self.samples = None                 # type: list
@@ -48,8 +52,9 @@ class DEAnalysis(object):
                     self.timeseries = True
             self.conditions = sorted(list(set(self.experiment_summary[condition])))
             self.expected_contrasts = self.possible_contrasts()
+            self.replicates = sorted(list(set(self.experiment_summary[replicate])))
 
-        # Import requisite R packages
+        # Bind R packages to the object so they don't pollute the namespace on import
         self.limma = importr('limma')
         self.stats = importr('stats')
 
@@ -149,6 +154,30 @@ class DEAnalysis(object):
         ids = [combo_set.index(combo) for combo in combos]
         return ids, combos, combo_set
 
+    def standardize(self):
+        """
+        Normalize the data to the 0 timepoint.
+
+        NOTE: This should have expanded functionality in the future
+        :return:
+        """
+        raw = self.data.copy()
+        for condition in self.conditions:
+            # Standardize genes at each timepoint
+            for tt in self.times:
+                data = raw.loc(axis=1)[condition, :, tt, :]
+                standard = np.nan_to_num(zscore(data, axis=0, ddof=1))
+                raw.loc(axis=1)[condition, :, tt, :] = standard
+
+            # Standardize genes across time
+            for rep in self.replicates:
+                data = raw.loc(axis=1)[condition, :, :, rep]
+
+                if data.shape[1] > 2:
+                    raw.loc(axis=1)[condition, :, :, rep] = zscore(data, axis=1, ddof=1)
+
+        self.data = raw
+
     def print_experiment_summary(self, verbose=False):
         """
         Print a summary of the experimental details
@@ -194,6 +223,7 @@ class DEAnalysis(object):
 
         # Log transform expression and correct values if needed
         data = np.log2(self.data.values)
+        # data = self.data.values
         if np.sum(np.isnan(data)) > 0:
             warnings.warn("NaNs detected during log expression transformation. Setting to NaN values to zero.")
             data = np.nan_to_num(data)
@@ -279,7 +309,11 @@ class DEAnalysis(object):
         return df
 
     def cluster_trajectories(self):
-        trajectory = self.decide_tests(self.de_fit)
+        trajectory = self.decide_tests(self.de_fit)         # type: pd.DataFrame
+        diff_list = [tuple(row) for row in trajectory.values]
+        print(diff_list)
+        print(len(set(diff_list)))
+        print(Counter(diff_list))
         return trajectory
 
     def fit(self, contrasts):

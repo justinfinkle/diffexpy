@@ -466,7 +466,8 @@ class DiscretizedClusterer(object):
         # Calculate the appropriate height based on the flow out of the current step (x) and level (y).
         heights = {}
         if x == 0:
-            heights[0] = np.sum([np.abs(x) for (x, y) in seg_dict.values()])
+            heights[0] = np.sum([np.abs(flow[0]) for seg, flow in flow_dict[x].items() if seg[0] == y])
+            # heights[0] = np.sum([np.abs(x) for (x, y) in seg_dict.values()])
         else:
             h_in = np.sum([np.abs(flow[0]) for seg, flow in flow_dict[x - 1].items() if seg[1] == y])
             h_out = np.sum([np.abs(flow[0]) for seg, flow in flow_dict[x].items() if seg[0] == y])

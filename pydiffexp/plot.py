@@ -131,7 +131,6 @@ def tsplot(df, supergroup='condition', subgroup='time'):
     ax.set_ylabel('Expression')
     ax.set_title(gene)
     plt.tight_layout()
-    plt.show()
 
 
 class DiffExpPlot(object):
