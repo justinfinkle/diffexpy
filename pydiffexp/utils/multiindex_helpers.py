@@ -1,4 +1,6 @@
 import warnings
+import re
+import sys
 import pandas as pd
 from pydiffexp.utils.utils import str_convert
 
@@ -15,7 +17,7 @@ def is_multiindex(df):
     return tuple(mi)
 
 
-def make_hierarchical(df, index_names=None, split_str='_') -> pd.DataFrame:
+def make_hierarchical(df, index_names=None, split_str='_', keep_original=False) -> pd.DataFrame:
     """
     Make a regular dataframe hierarchical by adding a MultiIndex
     :param df: dataframe; the dataframe to made hierarchical
@@ -28,11 +30,11 @@ def make_hierarchical(df, index_names=None, split_str='_') -> pd.DataFrame:
     # Split each label into hierarchy
     try:
         index = df.columns
-        s_index = split_index(index, split_str)
+        s_index = split_index(index, split_str, keep_original=keep_original)
     except ValueError:
         df = df.T
         index = df.columns
-        s_index = split_index(index, split_str)
+        s_index = split_index(index, split_str, keep_original=keep_original)
         warnings.warn('Multiindex found for rows, but not columns. Returned data frame is transposed from input')
 
     h_df = df.copy()
@@ -42,14 +44,18 @@ def make_hierarchical(df, index_names=None, split_str='_') -> pd.DataFrame:
     return h_df
 
 
-def split_index(index, split_str):
+def split_index(index, split_str, keep_original=False):
     """
     Split a list of strings into a list of tuples.
     :param index: list-like; List of strings to be split
     :param split_str: str; substring by which to split each string
+    :param keep_original:
     :return:
     """
-    s_index = [tuple(map(str_convert, ind.split(split_str))) for ind in index if split_str in ind]
+    if keep_original:
+        s_index = [tuple(list(map(str_convert, re.split(split_str, ind)))+[ind]) for ind in index]
+    else:
+        s_index = [tuple(map(str_convert, re.split(split_str, ind))) for ind in index]
     if len(s_index) != len(index):
         raise ValueError('Index not split properly using supplied string')
     return s_index

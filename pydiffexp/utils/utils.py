@@ -25,7 +25,7 @@ def int_or_float(s):
     return r
 
 
-def filter_value(x, value, axis=0, criteria='all'):
+def filter_value(x, value, axis=1, criteria='all'):
     if criteria == 'all':
         x = x[~(x == value).all(axis=axis)]
 
