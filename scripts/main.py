@@ -20,18 +20,36 @@ dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition',
 dea.fit(dea.expected_contrasts['KO-WT'])
 idx = pd.IndexSlice
 diffexp = dea.decide_tests(dea.de_fit)
-diffexp = mi.make_hierarchical(diffexp, ['num_c', 'num_t', 'denom_c', 'denom_t', 'contrast'], split_str='-|_', keep_original=True)
+diffexp = mi.make_hierarchical(diffexp, ['num_c', 'num_t', 'denom_c', 'denom_t', 'original'], split_str='-|_', keep_original=True)
 dea.fit(dea.expected_contrasts['WT_ts'])
-wt = mi.make_hierarchical(dea.decide_tests(dea.de_fit), ['num_c', 'num_t', 'denom_c', 'denom_t', 'contrast'], split_str='-|_', keep_original=True)
+wt = mi.make_hierarchical(dea.decide_tests(dea.de_fit), ['num_c', 'num_t', 'denom_c', 'denom_t', 'original'], split_str='-|_', keep_original=True)
 dea.fit(dea.expected_contrasts['KO_ts'])
-ko = mi.make_hierarchical(dea.decide_tests(dea.de_fit), ['num_c', 'num_t', 'denom_c', 'denom_t', 'contrast'], split_str='-|_', keep_original=True)
-all_tests = pd.DataFrame(pd.concat((diffexp, wt, ko), axis=1, keys=['diff', 'wt_ts', 'ko_ts']))
-print(all_tests)
-sys.exit()
+ko = mi.make_hierarchical(dea.decide_tests(dea.de_fit), ['num_c', 'num_t', 'denom_c', 'denom_t', 'original'], split_str='-|_', keep_original=True)
+all_tests = pd.DataFrame(pd.concat((diffexp, wt, ko), axis=1, keys=['diff', 'wt_ts', 'ko_ts'], names=['contrasts']+ko.columns.names))
 c = np.array([diffexp.index.values, [tuple(row) for row in diffexp.values], [tuple(row) for row in wt.values],
               [tuple(row) for row in ko.values]]).T
 clusters = pd.DataFrame(c, columns=['gene', 'diff', 'wt', 'ko'])
+gene = 'BTD'
+tsplot(dea.data.loc[gene])
+g = dea.data.loc[gene, idx['KO']]
+g = g.reset_index()
+g = g.groupby('time')
+g_ko = np.array([[g, np.mean(data[gene])] for g, data in g]).T
+
+
+g = dea.data.loc[gene, idx['WT']]
+g = g.reset_index()
+g = g.groupby('time')
+g_wt = np.array([[g, np.mean(data[gene])] for g, data in g]).T
+plt.plot(g_ko[0], g_ko[1]-g_wt[1])
+plt.show()
 clusters.set_index(['diff', 'wt', 'ko'], inplace=True)
+clusters.sort_index(inplace=True)
+print(clusters.loc[idx[(0,0,1,1,1)]])
+sys.exit()
+tsplot(dea.data.loc['FEZ2'])
+plt.show()
+sys.exit()
 counts = clusters.groupby(level=[1]).count()
 counts.drop((0,0,0,0), inplace=True)
 plt.bar(range(len(counts)), counts.values)
