@@ -52,12 +52,12 @@ idx = pd.IndexSlice
 
 dea.fit(dea.expected_contrasts['WT_ts'])
 # print(dea.get_results().head())
-dea.decide = dea.decide_tests(dea.de_fit, p_value=0.01)
+dea.decide = dea.decide_tests(dea.fit, p_value=0.01)
 # print(dea.decide.iloc[gene])
 # print(dea.decide[dea.decide.any(axis=1)!=0])
 
 
-# dea.fit(dea.expected_contrasts['WT_ts'])
+# dea.fit_contrasts(dea.expected_contrasts['WT_ts'])
 # print(dea.get_results().head())
 # dea.decide = dea.decide_tests(dea.de_fit, p_value=0.01)
 # print(dea.decide.iloc[gene])
@@ -66,7 +66,7 @@ dea.decide = dea.decide_tests(dea.de_fit, p_value=0.01)
 
 dea.cluster_trajectories()
 # tsplot(dea.data.loc['ZZZ3'])
-tests = dea.decide_tests(dea.de_fit, p_value=0.001)
+tests = dea.decide_tests(dea.fit, p_value=0.001)
 # decide = dea.get_results(p_value=0.001, lfc=4)
 # decide = decide[(np.sum(np.abs(tests), axis=1)!=5) & (np.sum(np.abs(tests), axis=1)!=0)]
 # plt.plot(dea.times, decide.T.iloc[:len(dea.times)])
@@ -100,7 +100,7 @@ sys.exit()
 # sys.exit()
 # list_genes = dea.get_results(coef=1)
 #
-# dea.fit(c_dict)
+# dea.fit_contrasts(c_dict)
 # dict_genes = dea.get_results()
 # print(grepl(list_genes.index, 'WNT'))
 # print(grepl(dict_genes.index, 'WNT'))

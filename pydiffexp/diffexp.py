@@ -6,8 +6,6 @@ import rpy2.robjects as robjects
 import rpy2.robjects.numpy2ri
 from scipy.stats import zscore
 from rpy2.robjects.packages import importr
-from rpy2.robjects import pandas2ri, default_converter
-from rpy2.robjects.conversion import localconverter
 from pydiffexp.utils.utils import int_or_float, filter_value, grepl, contrast_map
 import pydiffexp.utils.multiindex_helpers as mi
 import pydiffexp.utils.rpy2_helpers as rh
@@ -38,8 +36,7 @@ class DEAnalysis(object):
         self.design = None                  # type: robjects.vectors.Matrix
         self.data_matrix = None             # type: robjects.vectors.Matrix
         self.contrast_robj = None           # type: robjects.vectors.Matrix
-        self.l_fit = None                   # type: robjects.vectors.ListVector
-        self.de_fit = None                  # type: robjects.vectors.ListVector
+        self.fit = None                     # type: MArrayLM
         self.results = None                 # type: pd.DataFrame
         self.decide = None                  # type: pd.DataFrame
 
@@ -254,12 +251,12 @@ class DEAnalysis(object):
     def _ebayes(self, fit_obj, contrast_obj):
         """
         Calculate differential expression using empirical bayes
-        :param fit_obj: MArrayLM; linear model fit from limma in R. Typically from R function limma.lmFit()
-        :param contrast_obj: R-matrix; numeric matrix with rows corresponding to coefficients in fit and columns
+        :param fit_obj: MArrayLM; linear model fit_contrasts from limma in R. Typically from R function limma.lmFit()
+        :param contrast_obj: R-matrix; numeric matrix with rows corresponding to coefficients in fit_contrasts and columns
             containing contrasts.
         :return:
         """
-        contrast_fit = self.limma.contrasts_fit(fit=fit_obj, contrasts=contrast_obj)
+        contrast_fit = self.limma.contrasts_fit(fit=fit_obj.robj, contrasts=contrast_obj)
         bayes_fit = self.limma.eBayes(contrast_fit)
         return bayes_fit
 
@@ -294,9 +291,9 @@ class DEAnalysis(object):
         if use_fstat:
             if 'coef' in kwargs.keys():
                 raise ValueError('Cannot specify value for argument "coef" when using F statistic for topTableF')
-            table = self.limma.topTableF(self.de_fit, **kwargs)
+            table = self.limma.topTableF(self.fit, **kwargs)
         else:
-            table = self.limma.topTable(self.de_fit, **kwargs)
+            table = self.limma.topTable(self.fit, **kwargs)
 
         df = rh.rvect_to_py(table)
 
@@ -308,14 +305,14 @@ class DEAnalysis(object):
         return df
 
     def cluster_trajectories(self):
-        trajectory = self.decide_tests(self.de_fit)         # type: pd.DataFrame
+        trajectory = self.decide_tests(self.fit)         # type: pd.DataFrame
         diff_list = [tuple(row) for row in trajectory.values]
         print(diff_list)
         print(len(set(diff_list)))
         print(Counter(diff_list))
         return trajectory
 
-    def fit(self, contrasts):
+    def fit_contrasts(self, contrasts):
         """
         Fit the differential expression model using the supplied contrasts
         :param contrasts: str, list, or dict; contrasts to test for differential expression. Strings and elements of
@@ -325,16 +322,17 @@ class DEAnalysis(object):
         # Save the user supplied contrasts
         self.contrasts = contrasts
         if self.data is None:
-            raise ValueError('Please add data using set_data() before attempting to fit.')
+            raise ValueError('Please add data using set_data() before attempting to fit_contrasts.')
 
         # Setup design, data, and contrast matrices
         self.design = self._make_model_matrix()
         self.data_matrix = self._make_data_matrix()
         self.contrast_robj = self._make_contrasts(contrasts=self.contrasts, levels=self.design)
 
-        # Perform a linear fit, then empirical bayes fit
-        self.l_fit = self.limma.lmFit(self.data_matrix, self.design)
-        self.de_fit = self._ebayes(self.l_fit, self.contrast_robj)
+        # Perform a linear fit_contrasts, then empirical bayes fit_contrasts
+        linear_fit = self.limma.lmFit(self.data_matrix, self.design)
+        linear_fit = MArrayLM(linear_fit)
+        self.fit = self._ebayes(linear_fit, self.contrast_robj)
 
         # Set results to include all test values
         self.results = self.get_results(p_value=np.inf)
@@ -370,3 +368,56 @@ class DEAnalysis(object):
                      "\nTo save object please rerun with a different file path or choose to rewrite")
 
         return
+
+
+class MArrayLM(object):
+    """
+    Class to wrap MArrayLM from R. Makes data more easily accessible
+    """
+    def __init__(self, obj):
+        """
+
+        :param obj:
+        """
+        # Store the original object
+        self.robj = obj                 # type: robj.vectors.ListVector
+
+        # Initialize expected attributes. See R documentation on MArrayLM for more details on attributes
+        self.Amean = None               # type: np.ndarray
+        self.F = None                   # type: np.ndarray
+        self.F_p_value = None           # type: np.ndarray
+        self.assign = None              # type: np.ndarray
+        self.coefficients = None        # type: pd.DataFrame
+        self.contrasts = None           # type: pd.DataFrame
+        self.cov_coefficients = None    # type: pd.DataFrame
+        self.design = None              # type: pd.DataFrame
+        self.df_prior = None            # type: float
+        self.df_residual = None         # type: np.ndarray
+        self.df_total = None            # type: np.ndarray
+        self.lods = None                # type: pd.DataFrame
+        self.method = None              # type: str
+        self.p_value = None             # type: pd.DataFrame
+        self.proportion = None          # type: float
+        self.qr = None                  # type: dict
+        self.rank = None                # type: int
+        self.s2_post = None             # type: np.ndarray
+        self.s2_prior = None            # type: float
+        self.sigma = None               # type: np.ndarray
+        self.stdev_unscaled = None      # type: pd.DataFrame
+        self.t = None                   # type: pd.DataFrame
+        self.var_prior = None           # type: float
+
+        # Unpact the values
+        self.unpack()
+
+    def unpack(self):
+        """
+        Unpack the MArrayLM object (rpy2 listvector) into an object.
+        :return:
+        """
+        # Unpack the list vector object
+        data = rh.unpack_r_listvector(self.robj)
+
+        # Store the values into attributes
+        for k, v in data.items():
+            setattr(self, k, v)

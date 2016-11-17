@@ -1,65 +1,7 @@
-import sys
 import pandas as pd
 import numpy as np
 import rpy2.robjects as robj
-from rpy2.robjects.methods import RS4
 from rpy2.robjects import pandas2ri
-
-# Activate the converter
-pandas2ri.activate()
-
-
-class MArrayLM(RS4):
-    """
-    Class to wrap MArrayLM from R. Makes data more easily accessible
-    """
-    def __init__(self, obj):
-        """
-
-        :param obj:
-        """
-        # Store the original object
-        self.robj = obj                 # type: robj.vectors.ListVector
-
-        # Initialize expected attributes. See R documentation on MArrayLM for more details on attributes
-        self.Amean = None               # type: np.ndarray
-        self.F = None                   # type: np.ndarray
-        self.F_p_value = None           # type: np.ndarray
-        self.assign = None              # type: np.ndarray
-        self.coefficients = None        # type: pd.DataFrame
-        self.contrasts = None           # type: pd.DataFrame
-        self.cov_coefficients = None    # type: pd.DataFrame
-        self.design = None              # type: pd.DataFrame
-        self.df_prior = None            # type: float
-        self.df_residual = None         # type: np.ndarray
-        self.df_total = None            # type: np.ndarray
-        self.lods = None                # type: pd.DataFrame
-        self.method = None              # type: str
-        self.p_value = None             # type: pd.DataFrame
-        self.proportion = None          # type: float
-        self.qr = None                  # type: dict
-        self.rank = None                # type: int
-        self.s2_post = None             # type: np.ndarray
-        self.s2_prior = None            # type: float
-        self.sigma = None               # type: np.ndarray
-        self.stdev_unscaled = None      # type: pd.DataFrame
-        self.t = None                   # type: pd.DataFrame
-        self.var_prior = None           # type: float
-
-        # Unpact the values
-        self.unpack()
-
-    def unpack(self):
-        """
-        Unpack the MArrayLM object (rpy2 listvector) into an object.
-        :return:
-        """
-        # Unpack the list vector object
-        data = unpack_r_listvector(self.robj)
-
-        # Store the values into attributes
-        for k, v in data.items():
-            setattr(self, k, v)
 
 
 def unpack_r_listvector(l_vector: robj.vectors.ListVector) -> dict:
@@ -82,7 +24,13 @@ def rvect_to_py(vector):
 
     # DataFrame
     if isinstance(vector, robj.vectors.DataFrame):
+        '''
+        The converter is activated and then deactivated. There have been some reports of inconsistencies if the
+        converter is activated during import
+        '''
+        pandas2ri.activate()
         x = pandas2ri.ri2py(vector)
+        pandas2ri.deactivate()
 
     # Matrix
     elif isinstance(vector, robj.vectors.Matrix):

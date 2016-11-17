@@ -19,16 +19,17 @@ raw_data[raw_data <= 0] = 1
 dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition', 'time'])
 
 # Find differential expression at each time point
-dea.fit(dea.expected_contrasts['KO-WT'])
+dea.fit_contrasts(dea.expected_contrasts['KO-WT'])
+print(dea.get_results())
 sys.exit()
 
 idx = pd.IndexSlice
-diffexp = dea.decide_tests(dea.de_fit)
+diffexp = dea.decide_tests(dea.fit)
 diffexp = mi.make_hierarchical(diffexp, ['num_c', 'num_t', 'denom_c', 'denom_t', 'original'], split_str='-|_', keep_original=True)
-dea.fit(dea.expected_contrasts['WT_ts'])
-wt = mi.make_hierarchical(dea.decide_tests(dea.de_fit), ['num_c', 'num_t', 'denom_c', 'denom_t', 'original'], split_str='-|_', keep_original=True)
-dea.fit(dea.expected_contrasts['KO_ts'])
-ko = mi.make_hierarchical(dea.decide_tests(dea.de_fit), ['num_c', 'num_t', 'denom_c', 'denom_t', 'original'], split_str='-|_', keep_original=True)
+dea.fit_contrasts(dea.expected_contrasts['WT_ts'])
+wt = mi.make_hierarchical(dea.decide_tests(dea.fit), ['num_c', 'num_t', 'denom_c', 'denom_t', 'original'], split_str='-|_', keep_original=True)
+dea.fit_contrasts(dea.expected_contrasts['KO_ts'])
+ko = mi.make_hierarchical(dea.decide_tests(dea.fit), ['num_c', 'num_t', 'denom_c', 'denom_t', 'original'], split_str='-|_', keep_original=True)
 all_tests = pd.DataFrame(pd.concat((diffexp, wt, ko), axis=1, keys=['diff', 'wt_ts', 'ko_ts'], names=['contrasts']+ko.columns.names))
 c = np.array([diffexp.index.values, [tuple(row) for row in diffexp.values], [tuple(row) for row in wt.values],
               [tuple(row) for row in ko.values]]).T
