@@ -20,9 +20,6 @@ dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition',
 
 # Find differential expression at each time point
 dea.fit(dea.expected_contrasts['KO-WT'])
-robj = dea.de_fit
-m = rh.MArrayLM(robj)
-print(m.var_prior)
 sys.exit()
 
 idx = pd.IndexSlice

@@ -3,6 +3,10 @@ import pandas as pd
 import numpy as np
 import rpy2.robjects as robj
 from rpy2.robjects.methods import RS4
+from rpy2.robjects import pandas2ri
+
+# Activate the converter
+pandas2ri.activate()
 
 
 class MArrayLM(RS4):
@@ -76,8 +80,12 @@ def rvect_to_py(vector):
     """
     x = None
 
+    # DataFrame
+    if isinstance(vector, robj.vectors.DataFrame):
+        x = pandas2ri.ri2py(vector)
+
     # Matrix
-    if isinstance(vector, robj.vectors.Matrix):
+    elif isinstance(vector, robj.vectors.Matrix):
         x = pd.DataFrame(np.array(vector), index=vector.rownames, columns=vector.colnames)
 
     # Integers

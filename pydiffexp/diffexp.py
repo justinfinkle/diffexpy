@@ -10,9 +10,8 @@ from rpy2.robjects import pandas2ri, default_converter
 from rpy2.robjects.conversion import localconverter
 from pydiffexp.utils.utils import int_or_float, filter_value, grepl, contrast_map
 import pydiffexp.utils.multiindex_helpers as mi
+import pydiffexp.utils.rpy2_helpers as rh
 from natsort import natsorted
-
-import matplotlib.pyplot as plt
 
 # Activate conversion
 rpy2.robjects.numpy2ri.activate()
@@ -269,7 +268,7 @@ class DEAnalysis(object):
         decide = self.limma.decideTests(fit_obj, method=method, **kwargs)
 
         # Convert to dataframe
-        df = pd.DataFrame(np.array(decide), index=decide.rownames, columns=decide.colnames).astype(int)
+        df = rh.rvect_to_py(decide)
         return df
 
     def get_results(self, use_fstat=None, p_value=0.05, n='inf', **kwargs) -> pd.DataFrame:
@@ -299,11 +298,11 @@ class DEAnalysis(object):
         else:
             table = self.limma.topTable(self.de_fit, **kwargs)
 
-        with localconverter(default_converter + pandas2ri.converter) as cv:
-            df = pandas2ri.ri2py(table)     # type: pd.DataFrame
+        df = rh.rvect_to_py(table)
 
         # Rename the column and add the negative log10 values
-        df.rename(columns={'adj.P.Val': 'adj_pval', 'P.Value': 'pval'}, inplace=True)
+        df.rename(columns={'adj.P.Val': 'adj_pval', 'P.Value': 'pval'}, inplace=True)       # Remove expected periods
+        df.columns = [col.replace('.', '-') for col in df.columns]
         df['-log10p'] = -np.log10(df['adj_pval'])
 
         return df
