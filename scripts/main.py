@@ -4,6 +4,7 @@ import numpy as np
 from collections import Counter
 from pydiffexp import DEAnalysis, volcano_plot, tsplot, filter_value
 import pydiffexp.utils.multiindex_helpers as mi
+import pydiffexp.utils.rpy2_helpers as rh
 import discretized_clustering as dcluster
 import matplotlib.pyplot as plt
 from scipy import stats
@@ -19,48 +20,11 @@ dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition',
 
 # Find differential expression at each time point
 dea.fit(dea.expected_contrasts['KO-WT'])
-res = dea.get_results(coef=1, p_value=1)
-res = res[res['pval'] <= 0.05].loc['GBF1']
-gene = 'GBF1'
-idx = pd.IndexSlice
-ps = []
-gs = []
-for ci in np.linspace(0,1):
-    cis = []
-    gs = []
-    ps = []
-    for i in [0, 15, 60, 120, 240]:
-        wt = dea.data.loc[gene, idx['WT', :, i, :]]
-        ko = dea.data.loc[gene, idx['KO', :, i, :]]
-        x_wt = np.mean(wt)
-        x_ko = np.mean(ko)
-        desired_p = 0.031826709456797622
-        pooled_df = len(wt)+len(ko) - 2
-        t_sig = stats.t.ppf(1-desired_p/2, df=pooled_df)
-        percent_ci = ci
-        t_ci_wt = stats.t.ppf(1-(1-percent_ci)/2, df=len(wt)-1)
-        t_ci_ko = stats.t.ppf(1-(1-percent_ci)/2, df=len(ko)-1)
-        wt_err = t_ci_wt*stats.sem(wt)
-        ko_err = t_ci_ko*stats.sem(ko)
-        pval = stats.ttest_ind(wt, ko, equal_var=True)[1]
-        # print(stats.sem(wt), np.std(wt, ddof=1), np.sqrt(len(wt)), np.std(wt, ddof=1)/np.sqrt(len(wt)))
-        # print(pooled_df, t_sig, t_ci_wt, t_ci_ko)
-        # plt.errorbar([1,1], [x_wt, x_ko], fmt='o', yerr=[wt_err, ko_err])
-        gap = np.abs(x_wt-x_ko)-(wt_err+ko_err)
-        ps.append(pval)
-        gs.append(gap)
-        cis.append(ci)
-    plt.plot(ps, gs, 'o')
-plt.show()
+robj = dea.de_fit
+m = rh.MArrayLM(robj)
+print(m.var_prior)
 sys.exit()
-print(stats.t.cdf(np.abs(x_wt-x_ko)/(stats.sem(wt)+stats.sem(ko)), df=len(wt)-1))
-f = ((stats.sem(wt)+stats.sem(ko))/np.abs(x_wt-x_ko))
-dp = (1-stats.t.cdf(1/f, df=len(wt)-1))/2
-t_sig = stats.t.ppf(1-dp/2, df=pooled_df)
-sys.exit()
-# print(dea.get_results(coef=1, n=5))
-# print(dea.de_fit[17])
-# sys.exit()
+
 idx = pd.IndexSlice
 diffexp = dea.decide_tests(dea.de_fit)
 diffexp = mi.make_hierarchical(diffexp, ['num_c', 'num_t', 'denom_c', 'denom_t', 'original'], split_str='-|_', keep_original=True)

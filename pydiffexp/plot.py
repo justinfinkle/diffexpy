@@ -94,11 +94,15 @@ def volcano_plot(df: pd.DataFrame, p_value: float=0.05, fc=2, x_colname='logFC',
     plt.show()
 
 
-def add_ts(ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None):
+def add_ts(ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None, ci=0.83):
     gene = data.name
     data = data.reset_index()
     grouped_data = data.groupby(subgroup)
-    grouped_stats = np.array([[g, np.mean(data[gene]), stats.sem(data[gene])] for g, data in grouped_data]).T
+
+    # Get plotting statistics. Rows are: group, mean, SE, and Tstat
+    grouped_stats = np.array([[g, np.mean(data[gene]), stats.sem(data[gene]), stats.t.ppf(1-(1-ci)/2, df=len(data)-1)]
+                              for g, data in grouped_data]).T
+
     if mean_line_dict is None:
         mean_line_dict = dict()
     if fill_dict is None:
@@ -110,10 +114,10 @@ def add_ts(ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None)
     jitter_x = data[subgroup]#+(np.random.normal(0, 1, len(data)))
     ax.plot(jitter_x, data[gene], '.', color=mean_color, ms=15, label='', alpha=0.5)
 
-    fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.2, label="")
+    fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.2, label=(name+(' {:d}%CI'.format(int(ci*100)))))
     fill_kwargs = dict(fill_defaults, **fill_dict)
-    ax.fill_between(grouped_stats[0], grouped_stats[1] - grouped_stats[2], grouped_stats[1] + grouped_stats[2],
-                    **fill_kwargs)
+    ax.fill_between(grouped_stats[0], grouped_stats[1] - grouped_stats[2]*grouped_stats[3],
+                    grouped_stats[1] + grouped_stats[2]*grouped_stats[3], **fill_kwargs)
 
 
 def tsplot(df, supergroup='condition', subgroup='time'):
