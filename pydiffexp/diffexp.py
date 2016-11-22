@@ -96,23 +96,33 @@ class DEAnalysis(object):
             self.labels = list(map(lambda x: 'x%i' % x, range(len(summary_df))))
         return summary_df
 
-    def possible_contrasts(self):
+    def possible_contrasts(self, p_idx=0):
         """
         Make a list of expected contrasts based on times and conditions
+        :param p_idx: int; the index of the time sample when the perturbation was applied
         :return:
         """
         if self.timeseries:
             conditions_permutes = list(itertools.product(self.conditions, repeat=2))
             contrasts = {}
             for c in conditions_permutes:
+                # Time series
                 if c[0] == c[1]:
                     x = c[0]
                     samples = grepl(self.samples, x)
                     contrasts[str(x) + '_ts'] = (list(map('-'.join, zip(samples[1:], samples[:-1]))))
+
+                    # Autoregression
+                    contrasts[str(x) + '_ar'] = (list(map('-'.join, zip(samples[:-1],
+                                                                        [samples[p_idx]]*(len(samples)-1)))))
+
+                # Static
                 else:
                     contrasts[c[0] + '-' + c[1]] = list(
                         map('-'.join, zip(grepl(self.samples, c[0]), grepl(self.samples, c[1]))))
             diffs = list(itertools.permutations(grepl(contrasts.keys(), '_ts'), 2))
+
+            # Diff of diffs (KO_i-KO_i-1)-(WT_i-WT_i-1)
             for diff in diffs:
                 ts1 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[0]]))
                 ts2 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[1]]))
@@ -124,6 +134,7 @@ class DEAnalysis(object):
 
     def suggest_contrasts(self):
         print('Timeseries Data:', self.timeseries)
+        print('ts = Timeseries contrasts, ar = Autoregressive contrasts \n')
         if isinstance(self.expected_contrasts, dict):
             sorted_keys = sorted(self.expected_contrasts.keys())
             for k in sorted_keys:

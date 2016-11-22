@@ -19,9 +19,19 @@ raw_data[raw_data <= 0] = 1
 dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition', 'time'])
 
 # Find differential expression at each time point
-dea.fit_contrasts(dea.expected_contrasts['KO-WT'])
-print(dea.get_results())
+dea.suggest_contrasts()
 sys.exit()
+dea.fit_contrasts(['KO_15-KO_0', 'KO_60-KO_0', 'KO_120-KO_0', 'KO_240-KO_0'])
+r = dea.get_results()
+# plt.plot(dea.times[1:], r.iloc[:100, :4].T)
+print(r.head(5))
+# plt.legend()
+
+tsplot(dea.data.loc['SGK1'])
+plt.show()
+
+sys.exit()
+# sys.exit()
 
 idx = pd.IndexSlice
 diffexp = dea.decide_tests(dea.fit)
@@ -34,11 +44,12 @@ all_tests = pd.DataFrame(pd.concat((diffexp, wt, ko), axis=1, keys=['diff', 'wt_
 c = np.array([diffexp.index.values, [tuple(row) for row in diffexp.values], [tuple(row) for row in wt.values],
               [tuple(row) for row in ko.values]]).T
 clusters = pd.DataFrame(c, columns=['gene', 'diff', 'wt', 'ko'])
-gene = 'BTD'
+gene = 'AREG'
 
 clusters.set_index(['diff', 'wt', 'ko'], inplace=True)
 clusters.sort_index(inplace=True)
 print(clusters.loc[idx[(0,0,1,1,1)]])
+plt.figure()
 tsplot(dea.data.loc[gene])
 g = dea.data.loc[gene, idx['KO']]
 g = g.reset_index()
