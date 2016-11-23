@@ -2,7 +2,7 @@ import sys, warnings
 import pandas as pd
 import numpy as np
 from collections import Counter
-from pydiffexp import DEAnalysis, volcano_plot, tsplot, filter_value
+from pydiffexp import DEAnalysis, volcano_plot, tsplot
 import pydiffexp.utils.multiindex_helpers as mi
 import pydiffexp.utils.rpy2_helpers as rh
 import discretized_clustering as dcluster
@@ -26,8 +26,8 @@ gene = 'TUBB2B'
 # print(dea.get_results())
 # print(dea.decide_tests(dea.fit).loc[gene])
 
-dea.fit_contrasts(dea.expected_contrasts['KO_ar-WT_ar'])
-dea.get_results()
+dea.fit_contrasts([dea.expected_contrasts['KO_ar-WT_ar'], dea.expected_contrasts['KO_ts']], names=['AR', 'KO_ts'])
+print(dea.fit)
 sys.exit()
 print(dea.get_results(n=5))
 print(dea.decide_tests(dea.fit).loc[gene])

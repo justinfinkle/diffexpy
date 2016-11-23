@@ -6,7 +6,7 @@ import rpy2.robjects as robjects
 import rpy2.robjects.numpy2ri
 from scipy.stats import zscore
 from rpy2.robjects.packages import importr
-from pydiffexp.utils.utils import int_or_float, filter_value, grepl, contrast_map
+from pydiffexp.utils.utils import int_or_float, grepl
 import pydiffexp.utils.multiindex_helpers as mi
 import pydiffexp.utils.rpy2_helpers as rh
 from natsort import natsorted
@@ -54,7 +54,7 @@ class DEAnalysis(object):
         self.design = None                  # type: robjects.vectors.Matrix
         self.data_matrix = None             # type: robjects.vectors.Matrix
         self.contrast_robj = None           # type: robjects.vectors.Matrix
-        self.fit = None                     # type: MArrayLM
+        self.fit = None                     # type: dict
         self.results = None                 # type: pd.DataFrame
         self.decide = None                  # type: pd.DataFrame
 
@@ -366,7 +366,7 @@ class DEAnalysis(object):
 
         return fit
 
-    def fit_contrasts(self, contrasts):
+    def fit_contrasts(self, contrasts, names=None):
         """
         Wrapper to fit the differential expression model using the supplied contrasts.
 
@@ -390,11 +390,14 @@ class DEAnalysis(object):
             if n_strings != len(contrasts):
                 n_fits = len(contrasts)
 
-        if n_fits > 1:
-            self.fit = [self._fit_contrast(contrast) for contrast in contrasts]
+        if names is None:
+            names = [str(n) for n in range(n_fits)]
+        elif isinstance(names, str):
+            names = [names]
 
-        elif n_fits == 1:
-            self.fit = self._fit_contrast(contrasts)
+        if n_fits == 1:
+            contrasts = [contrasts]
+        self.fit = {name: self._fit_contrast(contrast) for name, contrast in zip(names, contrasts)}
 
     def to_pickle(self, path):
         # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame
