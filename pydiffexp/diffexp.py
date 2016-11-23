@@ -296,7 +296,7 @@ class DEAnalysis(object):
 
     def decide_tests(self, fit_obj, method='global', **kwargs):
         # Run decide tests
-        decide = self.limma.decideTests(fit_obj, method=method, **kwargs)
+        decide = self.limma.decideTests(fit_obj.robj, method=method, **kwargs)
 
         # Convert to dataframe
         df = rh.rvect_to_py(decide)
@@ -333,7 +333,9 @@ class DEAnalysis(object):
 
         # Rename the column and add the negative log10 values
         df.rename(columns={'adj.P.Val': 'adj_pval', 'P.Value': 'pval'}, inplace=True)       # Remove expected periods
-        df.columns = [col.replace('.', '-') for col in df.columns]
+        df_cols = df.columns.values.tolist()
+        df_cols[:len(self.contrasts)] = self.contrasts
+        df.columns = df_cols
         df['-log10p'] = -np.log10(df['adj_pval'])
 
         return df

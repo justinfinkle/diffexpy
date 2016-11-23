@@ -23,9 +23,11 @@ dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition',
 gene = 'TUBB2B'
 
 # dea.fit_contrasts(dea.expected_contrasts['KO-WT'])
+# print(dea.get_results())
 # print(dea.decide_tests(dea.fit).loc[gene])
+
 dea.fit_contrasts(dea.expected_contrasts['KO_ar-WT_ar'])
-print(dea.get_results())
+dea.get_results()
 sys.exit()
 print(dea.get_results(n=5))
 print(dea.decide_tests(dea.fit).loc[gene])
