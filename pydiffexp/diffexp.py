@@ -144,11 +144,11 @@ class DEAnalysis(object):
             for diff in diffs:
                 ts1 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[0]]))
                 ts2 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[1]]))
-                contrasts['-'.join(diff)] = {str(ii): contrast for ii, contrast in enumerate(map('-'.join, zip(ts1, ts2)))}
+                contrasts['-'.join(diff)] = [contrast for contrast in map('-'.join, zip(ts1, ts2))]
             for ar_diff in ar_diffs:
                 ts1 = list(map(lambda contrast: '(%s)' % contrast, contrasts[ar_diff[0]]))
                 ts2 = list(map(lambda contrast: '(%s)' % contrast, contrasts[ar_diff[1]]))
-                contrasts['-'.join(ar_diff)] = {str(ii): contrast for ii, contrast in enumerate(map('-'.join, zip(ts1, ts2)))}
+                contrasts['-'.join(ar_diff)] = [contrast for contrast in map('-'.join, zip(ts1, ts2))]
             expected_contrasts = contrasts
         else:
             expected_contrasts = list(map('-'.join, itertools.permutations(self.conditions, 2)))
