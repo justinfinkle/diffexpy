@@ -18,16 +18,31 @@ hierarchy = ['condition', 'well', 'time', 'replicate']
 raw_data[raw_data <= 0] = 1
 dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition', 'time'])
 
+
 # Find differential expression at each time point
-dea.suggest_contrasts()
+gene = 'TUBB2B'
+
+# dea.fit_contrasts(dea.expected_contrasts['KO-WT'])
+# print(dea.decide_tests(dea.fit).loc[gene])
+
+dea.fit_contrasts(dea.expected_contrasts['KO_ar-WT_ar'])
+print(dea.fit.contrasts)
 sys.exit()
-dea.fit_contrasts(['KO_15-KO_0', 'KO_60-KO_0', 'KO_120-KO_0', 'KO_240-KO_0'])
-r = dea.get_results()
+print(dea.get_results(n=5))
+print(dea.decide_tests(dea.fit).loc[gene])
+
+dea.fit_contrasts(dea.expected_contrasts['KO_ar'])
+# r = dea.get_results()
 # plt.plot(dea.times[1:], r.iloc[:100, :4].T)
-print(r.head(5))
+print(dea.decide_tests(dea.fit).loc[gene])
 # plt.legend()
 
-tsplot(dea.data.loc['SGK1'])
+dea.fit_contrasts(dea.expected_contrasts['WT_ar'])
+# r = dea.get_results()
+# plt.plot(dea.times[1:], r.iloc[:100, :4].T)
+print(dea.decide_tests(dea.fit).loc[gene])
+
+tsplot(dea.data.loc[gene])
 plt.show()
 
 sys.exit()

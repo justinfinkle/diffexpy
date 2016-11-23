@@ -22,6 +22,24 @@ class DEAnalysis(object):
 
     def __init__(self, df=None, index_names=None, split_str='_', time='time', condition='condition',
                  replicate='replicate', reference_labels=None):
+        """
+
+        :param df:
+        :param index_names:
+        :param split_str:
+        :param time:
+        :param condition:
+        :param replicate:
+        :param reference_labels:
+        """
+
+        '''
+        Bind R packages to the object so they don't pollute the namespace on import
+        NOTE: This may need to be changed if multiple DEA objects will be invoked. Unclear if each would open a separate
+        R session.
+        '''
+        self.limma = importr('limma')
+        self.stats = importr('stats')
 
         self.data = None                    # type: pd.DataFrame
         self.labels = None
@@ -50,10 +68,6 @@ class DEAnalysis(object):
             self.expected_contrasts = self.possible_contrasts()
             self.replicates = sorted(list(set(self.experiment_summary[replicate])))
 
-        # Bind R packages to the object so they don't pollute the namespace on import
-        self.limma = importr('limma')
-        self.stats = importr('stats')
-
     def _set_data(self, df, index_names=None, split_str='_', reference_labels=None):
         # Check for a multiindex or try making one
         multiindex = mi.is_multiindex(df)
@@ -77,6 +91,8 @@ class DEAnalysis(object):
         # Sort multiindex
 
         self.experiment_summary = self.get_experiment_summary(reference_labels=reference_labels)
+        self.design = self._make_model_matrix()
+        self.data_matrix = self._make_data_matrix()
 
     def get_experiment_summary(self, reference_labels=None):
         """
@@ -113,20 +129,26 @@ class DEAnalysis(object):
                     contrasts[str(x) + '_ts'] = (list(map('-'.join, zip(samples[1:], samples[:-1]))))
 
                     # Autoregression
-                    contrasts[str(x) + '_ar'] = (list(map('-'.join, zip(samples[:-1],
+                    contrasts[str(x) + '_ar'] = (list(map('-'.join, zip(samples[1:],
                                                                         [samples[p_idx]]*(len(samples)-1)))))
 
                 # Static
                 else:
                     contrasts[c[0] + '-' + c[1]] = list(
                         map('-'.join, zip(grepl(self.samples, c[0]), grepl(self.samples, c[1]))))
+
             diffs = list(itertools.permutations(grepl(contrasts.keys(), '_ts'), 2))
+            ar_diffs = list(itertools.permutations(grepl(contrasts.keys(), '_ar'), 2))
 
             # Diff of diffs (KO_i-KO_i-1)-(WT_i-WT_i-1)
             for diff in diffs:
                 ts1 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[0]]))
                 ts2 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[1]]))
-                contrasts['-'.join(diff)] = {ii: contrast for ii, contrast in enumerate(map('-'.join, zip(ts1, ts2)))}
+                contrasts['-'.join(diff)] = {str(ii): contrast for ii, contrast in enumerate(map('-'.join, zip(ts1, ts2)))}
+            for ar_diff in ar_diffs:
+                ts1 = list(map(lambda contrast: '(%s)' % contrast, contrasts[ar_diff[0]]))
+                ts2 = list(map(lambda contrast: '(%s)' % contrast, contrasts[ar_diff[1]]))
+                contrasts['-'.join(ar_diff)] = {str(ii): contrast for ii, contrast in enumerate(map('-'.join, zip(ts1, ts2)))}
             expected_contrasts = contrasts
         else:
             expected_contrasts = list(map('-'.join, itertools.permutations(self.conditions, 2)))
@@ -245,6 +267,7 @@ class DEAnalysis(object):
     def _make_contrasts(self, contrasts, levels):
         """
         Make an R contrasts object that is used by limma
+
         :param contrasts: dict, list, str; The contrast(s) to use in differential expression.  A dictionary will be
             passed as kwargs, which is analagous to the ellipsis "..." in R.
         :return:
@@ -268,7 +291,7 @@ class DEAnalysis(object):
         :return:
         """
         contrast_fit = self.limma.contrasts_fit(fit=fit_obj.robj, contrasts=contrast_obj)
-        bayes_fit = self.limma.eBayes(contrast_fit)
+        bayes_fit = MArrayLM(self.limma.eBayes(contrast_fit))
         return bayes_fit
 
     def decide_tests(self, fit_obj, method='global', **kwargs):
@@ -302,9 +325,9 @@ class DEAnalysis(object):
         if use_fstat:
             if 'coef' in kwargs.keys():
                 raise ValueError('Cannot specify value for argument "coef" when using F statistic for topTableF')
-            table = self.limma.topTableF(self.fit, **kwargs)
+            table = self.limma.topTableF(self.fit.robj, **kwargs)
         else:
-            table = self.limma.topTable(self.fit, **kwargs)
+            table = self.limma.topTable(self.fit.robj, **kwargs)
 
         df = rh.rvect_to_py(table)
 
@@ -323,11 +346,32 @@ class DEAnalysis(object):
         print(Counter(diff_list))
         return trajectory
 
+    def _fit_contrast(self, contrast):
+        """
+        Fit the differential expression model using the supplied contrasts.
+
+        :param contrast:  str, list, or dict; contrasts to test for differential expression. Strings and elements of
+        lists must be in the format "X-Y". Dictionary elements must be in {contrast_name:"(X1-X0)-(Y1-Y0)").
+        :return:
+        """
+        # Setup contrast matrix
+        contrast_robj = self._make_contrasts(contrasts=contrast, levels=self.design)
+
+        # Perform a linear fit_contrasts, then empirical bayes fit_contrasts
+        linear_fit = self.limma.lmFit(self.data_matrix, self.design)
+        linear_fit = MArrayLM(linear_fit)
+        fit = self._ebayes(linear_fit, contrast_robj)
+
+        return fit
+
     def fit_contrasts(self, contrasts):
         """
-        Fit the differential expression model using the supplied contrasts
+        Wrapper to fit the differential expression model using the supplied contrasts.
+
         :param contrasts: str, list, or dict; contrasts to test for differential expression. Strings and elements of
-        lists must be in the format "X-Y". Dictionary elements must be in {contrast_name:"(X1-X0)-(Y1-Y0)")
+        lists must be in the format "X-Y". Dictionary elements must be in {contrast_name:"(X1-X0)-(Y1-Y0)"). To conduct
+        multiple fits, a list of mixed contrast types can be supplied. Each list item will be treated as an independent
+        fit.
         :return:
         """
         # Save the user supplied contrasts
@@ -335,18 +379,20 @@ class DEAnalysis(object):
         if self.data is None:
             raise ValueError('Please add data using set_data() before attempting to fit_contrasts.')
 
-        # Setup design, data, and contrast matrices
-        self.design = self._make_model_matrix()
-        self.data_matrix = self._make_data_matrix()
-        self.contrast_robj = self._make_contrasts(contrasts=self.contrasts, levels=self.design)
+        # Determine contrast type
+        n_fits = 1
+        if isinstance(contrasts, list):
+            n_strings = sum([isinstance(l, str) for l in contrasts])
 
-        # Perform a linear fit_contrasts, then empirical bayes fit_contrasts
-        linear_fit = self.limma.lmFit(self.data_matrix, self.design)
-        linear_fit = MArrayLM(linear_fit)
-        self.fit = self._ebayes(linear_fit, self.contrast_robj)
+            # If all items in the list aren't strings, then it is likely multiple contrasts for independent fits
+            if n_strings != len(contrasts):
+                n_fits = len(contrasts)
 
-        # Set results to include all test values
-        self.results = self.get_results(p_value=np.inf)
+        if n_fits > 1:
+            self.fit = [self._fit_contrast(contrast) for contrast in contrasts]
+
+        elif n_fits == 1:
+            self.fit = self._fit_contrast(contrasts)
 
     def to_pickle(self, path):
         # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame
