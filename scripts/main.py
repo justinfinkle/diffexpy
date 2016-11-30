@@ -27,8 +27,6 @@ gene = 'TUBB2B'
 # print(dea.decide_tests(dea.fit).loc[gene])
 
 dea.fit_contrasts([dea.expected_contrasts['KO_ar-WT_ar'], dea.expected_contrasts['KO_ts']], names=['AR', 'KO_ts'])
-der = DEResults(dea.fit)
-print(der.top_table(dea.fit['KO_ts'], p_value=1))
 sys.exit()
 print(dea.top_table(n=5))
 print(dea.decide_tests(dea.fit).loc[gene])

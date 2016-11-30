@@ -365,7 +365,6 @@ class DEAnalysis(object):
         fits = {name: self._fit_contrast(contrast) for name, contrast in zip(names, contrasts)}
         self.results = DEResults(fits)
 
-
     def to_pickle(self, path):
         # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame
         """
@@ -457,11 +456,31 @@ class DEResults(object):
     Class intended to organize results from differential expression analysis in easier fashion
     """
     def __init__(self, fit_dict):
-        pass
+        self.fit = fit_dict                         # type: dict
 
-    def top_table(self, fit, use_fstat=None, p_value=0.05, n='inf', **kwargs) -> pd.DataFrame:
+        self.unpack()
+
+    def unpack(self):
+        unpacked = pd.DataFrame()
+        for name, fit in self.fit.items():
+            # Make multiindex
+            df = self.top_table(fit, p_value=1)
+
+            # Make tuples specifiying the levels and labels
+            col_names = df.columns.values
+            fit_name = [name] * len(col_names)
+            idx_tuples = list(zip(fit_name, col_names))
+            df.columns = pd.MultiIndex.from_tuples(idx_tuples, names=['Fit', 'Value'])
+
+            # Add this fit to the running list
+            unpacked = pd.concat([unpacked, df], axis=1)
+        print(unpacked.filter(['adj_pval']))
+
+    @staticmethod
+    def top_table(fit, use_fstat=None, p_value=0.05, n='inf', **kwargs) -> pd.DataFrame:
         """
         Print top_table of differential expression analysis
+        :param fit: MArrayLM; a fit object created by DEAnalysis
         :param use_fstat: bool; select genes using F-statistic. Useful if testing significance for multiple contrasts,
         such as a time series
         :param p_value float; cutoff for significant top_table. Default is 0.05. If np.inf, then no cutoff is applied
