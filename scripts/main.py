@@ -2,7 +2,7 @@ import sys, warnings
 import pandas as pd
 import numpy as np
 from collections import Counter
-from pydiffexp import DEAnalysis, volcano_plot, tsplot
+from pydiffexp import DEAnalysis, volcano_plot, tsplot, DEResults
 import pydiffexp.utils.multiindex_helpers as mi
 import pydiffexp.utils.rpy2_helpers as rh
 import discretized_clustering as dcluster
@@ -23,23 +23,24 @@ dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition',
 gene = 'TUBB2B'
 
 # dea.fit_contrasts(dea.expected_contrasts['KO-WT'])
-# print(dea.get_results())
+# print(dea.top_table())
 # print(dea.decide_tests(dea.fit).loc[gene])
 
 dea.fit_contrasts([dea.expected_contrasts['KO_ar-WT_ar'], dea.expected_contrasts['KO_ts']], names=['AR', 'KO_ts'])
-print(dea.fit)
+der = DEResults(dea.fit)
+print(der.top_table(dea.fit['KO_ts'], p_value=1))
 sys.exit()
-print(dea.get_results(n=5))
+print(dea.top_table(n=5))
 print(dea.decide_tests(dea.fit).loc[gene])
 
 dea.fit_contrasts(dea.expected_contrasts['KO_ar'])
-# r = dea.get_results()
+# r = dea.top_table()
 # plt.plot(dea.times[1:], r.iloc[:100, :4].T)
 print(dea.decide_tests(dea.fit).loc[gene])
 # plt.legend()
 
 dea.fit_contrasts(dea.expected_contrasts['WT_ar'])
-# r = dea.get_results()
+# r = dea.top_table()
 # plt.plot(dea.times[1:], r.iloc[:100, :4].T)
 print(dea.decide_tests(dea.fit).loc[gene])
 

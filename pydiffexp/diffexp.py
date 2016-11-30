@@ -39,7 +39,6 @@ class DEAnalysis(object):
 
         self.data = None                    # type: pd.DataFrame
         self.labels = None
-        self.contrasts = None
         self.times = None                   # type: list
         self.conditions = None              # type: list
         self.replicates = None              # type: list
@@ -51,7 +50,7 @@ class DEAnalysis(object):
         self.data_matrix = None             # type: robjects.vectors.Matrix
         self.contrast_robj = None           # type: robjects.vectors.Matrix
         self.fit = None                     # type: dict
-        self.results = None                 # type: pd.DataFrame
+        self.results = None                 # type: DEResults
         self.decide = None                  # type: pd.DataFrame
 
         if df is not None:
@@ -301,44 +300,6 @@ class DEAnalysis(object):
         df = rh.rvect_to_py(decide)
         return df
 
-    def get_results(self, use_fstat=None, p_value=0.05, n='inf', **kwargs) -> pd.DataFrame:
-        """
-        Print get_results of differential expression analysis
-        :param use_fstat: bool; select genes using F-statistic. Useful if testing significance for multiple contrasts,
-        such as a time series
-        :param p_value float; cutoff for significant get_results. Default is 0.05. If np.inf, then no cutoff is applied
-        :param n int or 'inf'; number of significant get_results to include in output. Default is 'inf' which includes all
-        get_results passing the threshold
-        :param kwargs: additional arguments to pass to topTable. see topTable documentation in R for more details.
-        :return:
-        """
-
-        # Update kwargs with commonly used ones provided in this API
-        kwargs = dict(kwargs, p_value=p_value, n=n)
-
-        # Use fstat if multiple contrasts supplied
-        if use_fstat is None:
-            use_fstat = False if (isinstance(self.contrasts, str) or
-                                  (isinstance(self.contrasts, list) and len(self.contrasts) > 1)) else True
-
-        if use_fstat:
-            if 'coef' in kwargs.keys():
-                raise ValueError('Cannot specify value for argument "coef" when using F statistic for topTableF')
-            table = limma.topTableF(self.fit.robj, **kwargs)
-        else:
-            table = limma.topTable(self.fit.robj, **kwargs)
-
-        df = rh.rvect_to_py(table)
-
-        # Rename the column and add the negative log10 values
-        df.rename(columns={'adj.P.Val': 'adj_pval', 'P.Value': 'pval'}, inplace=True)       # Remove expected periods
-        df_cols = df.columns.values.tolist()
-        df_cols[:len(self.contrasts)] = self.contrasts
-        df.columns = df_cols
-        df['-log10p'] = -np.log10(df['adj_pval'])
-
-        return df
-
     def cluster_trajectories(self):
 
         trajectory = self.decide_tests(self.fit)         # type: pd.DataFrame
@@ -377,8 +338,7 @@ class DEAnalysis(object):
         :param names: str or list; names for each fit
         :return:
         """
-        # Save the user supplied contrasts
-        self.contrasts = contrasts
+
         if self.data is None:
             raise ValueError('Please add data using set_data() before attempting to fit_contrasts.')
 
@@ -402,7 +362,9 @@ class DEAnalysis(object):
             contrasts = [contrasts]
 
         # Make fit dictionary
-        self.fit = {name: self._fit_contrast(contrast) for name, contrast in zip(names, contrasts)}
+        fits = {name: self._fit_contrast(contrast) for name, contrast in zip(names, contrasts)}
+        self.results = DEResults(fits)
+
 
     def to_pickle(self, path):
         # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame
@@ -489,4 +451,50 @@ class MArrayLM(object):
         for k, v in data.items():
             setattr(self, k, v)
 
-#class DECluster(object):
+
+class DEResults(object):
+    """
+    Class intended to organize results from differential expression analysis in easier fashion
+    """
+    def __init__(self, fit_dict):
+        pass
+
+    def top_table(self, fit, use_fstat=None, p_value=0.05, n='inf', **kwargs) -> pd.DataFrame:
+        """
+        Print top_table of differential expression analysis
+        :param use_fstat: bool; select genes using F-statistic. Useful if testing significance for multiple contrasts,
+        such as a time series
+        :param p_value float; cutoff for significant top_table. Default is 0.05. If np.inf, then no cutoff is applied
+        :param n int or 'inf'; number of significant top_table to include in output. Default is 'inf' which includes all
+        top_table passing the threshold
+        :param kwargs: additional arguments to pass to topTable. see topTable documentation in R for more details.
+        :return:
+        """
+        # Update kwargs with commonly used ones provided in this API
+        kwargs = dict(kwargs, p_value=p_value, n=n)
+
+        # Pull contrasts from MArrayLM
+        contrasts = fit.contrasts.columns.values
+
+        # Use fstat if multiple contrasts supplied
+        if use_fstat is None:
+            use_fstat = False if (isinstance(contrasts, str) or
+                                  (isinstance(contrasts, list) and len(contrasts) > 1)) else True
+
+        if use_fstat:
+            if 'coef' in kwargs.keys():
+                raise ValueError('Cannot specify value for argument "coef" when using F statistic for topTableF')
+            table = limma.topTableF(fit.robj, **kwargs)
+        else:
+            table = limma.topTable(fit.robj, **kwargs)
+
+        df = rh.rvect_to_py(table)
+
+        # Rename the column and add the negative log10 values
+        df.rename(columns={'adj.P.Val': 'adj_pval', 'P.Value': 'pval'}, inplace=True)  # Remove expected periods
+        df_cols = df.columns.values.tolist()
+        df_cols[:len(contrasts)] = contrasts
+        df.columns = df_cols
+        df['-log10p'] = -np.log10(df['adj_pval'])
+
+        return df
