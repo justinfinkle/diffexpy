@@ -14,6 +14,10 @@ from natsort import natsorted
 # Activate conversion
 rpy2.robjects.numpy2ri.activate()
 
+# Load R packages
+limma = importr('limma')
+stats = importr('stats')
+
 
 class DEAnalysis(object):
     """
@@ -32,14 +36,6 @@ class DEAnalysis(object):
         :param replicate:
         :param reference_labels:
         """
-
-        '''
-        Bind R packages to the object so they don't pollute the namespace on import
-        NOTE: This may need to be changed if multiple DEA objects will be invoked. Unclear if each would open a separate
-        R session.
-        '''
-        self.limma = importr('limma')
-        self.stats = importr('stats')
 
         self.data = None                    # type: pd.DataFrame
         self.labels = None
@@ -237,8 +233,8 @@ class DEAnalysis(object):
         fmla = robjects.Formula(formula)
         fmla.environment['x'] = r_sample_labels
 
-        # Make the design matrix. self.stats is a bound R package
-        design = self.stats.model_matrix(fmla)
+        # Make the design matrix. stats is a bound R package
+        design = stats.model_matrix(fmla)
         design.colnames = robjects.StrVector(sorted(list(set(self.labels))))
         return design
 
@@ -264,7 +260,8 @@ class DEAnalysis(object):
         r_matrix.rownames = robjects.StrVector(genes)
         return r_matrix
 
-    def _make_contrasts(self, contrasts, levels):
+    @staticmethod
+    def _make_contrasts(contrasts, levels):
         """
         Make an R contrasts object that is used by limma
 
@@ -274,15 +271,16 @@ class DEAnalysis(object):
         """
         # If the contrasts are a dictionary they need to be unpacked as kwargs
         if isinstance(contrasts, dict):
-            contrast_obj = self.limma.makeContrasts(**contrasts,
+            contrast_obj = limma.makeContrasts(**contrasts,
                                                     levels=levels)
         # A string or list of strings can be passed directly
         else:
-            contrast_obj = self.limma.makeContrasts(contrasts=contrasts,
+            contrast_obj = limma.makeContrasts(contrasts=contrasts,
                                                     levels=levels)
         return contrast_obj
 
-    def _ebayes(self, fit_obj, contrast_obj):
+    @staticmethod
+    def _ebayes(fit_obj, contrast_obj):
         """
         Calculate differential expression using empirical bayes
         :param fit_obj: MArrayLM; linear model fit_contrasts from limma in R. Typically from R function limma.lmFit()
@@ -290,13 +288,14 @@ class DEAnalysis(object):
             containing contrasts.
         :return:
         """
-        contrast_fit = self.limma.contrasts_fit(fit=fit_obj.robj, contrasts=contrast_obj)
-        bayes_fit = MArrayLM(self.limma.eBayes(contrast_fit))
+        contrast_fit = limma.contrasts_fit(fit=fit_obj.robj, contrasts=contrast_obj)
+        bayes_fit = MArrayLM(limma.eBayes(contrast_fit))
         return bayes_fit
 
-    def decide_tests(self, fit_obj, method='global', **kwargs):
+    @staticmethod
+    def decide_tests(fit_obj, method='global', **kwargs):
         # Run decide tests
-        decide = self.limma.decideTests(fit_obj.robj, method=method, **kwargs)
+        decide = limma.decideTests(fit_obj.robj, method=method, **kwargs)
 
         # Convert to dataframe
         df = rh.rvect_to_py(decide)
@@ -325,9 +324,9 @@ class DEAnalysis(object):
         if use_fstat:
             if 'coef' in kwargs.keys():
                 raise ValueError('Cannot specify value for argument "coef" when using F statistic for topTableF')
-            table = self.limma.topTableF(self.fit.robj, **kwargs)
+            table = limma.topTableF(self.fit.robj, **kwargs)
         else:
-            table = self.limma.topTable(self.fit.robj, **kwargs)
+            table = limma.topTable(self.fit.robj, **kwargs)
 
         df = rh.rvect_to_py(table)
 
@@ -341,6 +340,7 @@ class DEAnalysis(object):
         return df
 
     def cluster_trajectories(self):
+
         trajectory = self.decide_tests(self.fit)         # type: pd.DataFrame
         diff_list = [tuple(row) for row in trajectory.values]
         print(diff_list)
@@ -360,7 +360,7 @@ class DEAnalysis(object):
         contrast_robj = self._make_contrasts(contrasts=contrast, levels=self.design)
 
         # Perform a linear fit_contrasts, then empirical bayes fit_contrasts
-        linear_fit = self.limma.lmFit(self.data_matrix, self.design)
+        linear_fit = limma.lmFit(self.data_matrix, self.design)
         linear_fit = MArrayLM(linear_fit)
         fit = self._ebayes(linear_fit, contrast_robj)
 
@@ -374,6 +374,7 @@ class DEAnalysis(object):
         lists must be in the format "X-Y". Dictionary elements must be in {contrast_name:"(X1-X0)-(Y1-Y0)"). To conduct
         multiple fits, a list of mixed contrast types can be supplied. Each list item will be treated as an independent
         fit.
+        :param names: str or list; names for each fit
         :return:
         """
         # Save the user supplied contrasts
@@ -390,13 +391,17 @@ class DEAnalysis(object):
             if n_strings != len(contrasts):
                 n_fits = len(contrasts)
 
+        # Make a list of names
         if names is None:
             names = [str(n) for n in range(n_fits)]
         elif isinstance(names, str):
             names = [names]
 
+        # Make sure the contrasts are also a list, for zipping
         if n_fits == 1:
             contrasts = [contrasts]
+
+        # Make fit dictionary
         self.fit = {name: self._fit_contrast(contrast) for name, contrast in zip(names, contrasts)}
 
     def to_pickle(self, path):
@@ -483,3 +488,5 @@ class MArrayLM(object):
         # Store the values into attributes
         for k, v in data.items():
             setattr(self, k, v)
+
+#class DECluster(object):
