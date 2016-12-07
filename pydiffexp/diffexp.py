@@ -467,6 +467,7 @@ class DEResults(object):
 
             # Add this fit to the running list
             unpacked = pd.concat([unpacked, fit], axis=1)
+        unpacked.sort_index(axis=1, inplace=True)
         return unpacked
 
     @staticmethod
