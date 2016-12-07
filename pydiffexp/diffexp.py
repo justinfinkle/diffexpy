@@ -291,24 +291,6 @@ class DEAnalysis(object):
         bayes_fit = MArrayLM(limma.eBayes(contrast_fit))
         return bayes_fit
 
-    @staticmethod
-    def decide_tests(fit_obj, method='global', **kwargs):
-        # Run decide tests
-        decide = limma.decideTests(fit_obj.robj, method=method, **kwargs)
-
-        # Convert to dataframe
-        df = rh.rvect_to_py(decide)
-        return df
-
-    def cluster_trajectories(self):
-
-        trajectory = self.decide_tests(self.fit)         # type: pd.DataFrame
-        diff_list = [tuple(row) for row in trajectory.values]
-        print(diff_list)
-        print(len(set(diff_list)))
-        print(Counter(diff_list))
-        return trajectory
-
     def _fit_contrast(self, contrast):
         """
         Fit the differential expression model using the supplied contrasts.
@@ -441,7 +423,6 @@ class MArrayLM(object):
     def unpack(self):
         """
         Unpack the MArrayLM object (rpy2 listvector) into an object.
-        :return:
         """
         # Unpack the list vector object
         data = rh.unpack_r_listvector(self.robj)
@@ -455,26 +436,38 @@ class DEResults(object):
     """
     Class intended to organize results from differential expression analysis in easier fashion
     """
-    def __init__(self, fit_dict):
+    def __init__(self, fit_dict, discrete_p=0.05):
         self.fit = fit_dict                         # type: dict
+        self.discrete = None                        # type: pd.DataFrame
+        self.continuous = None                      # type: pd.DataFrame
 
-        self.unpack()
+        self.discrete, self.continuous = self.unpack(discrete_p=discrete_p)
 
-    def unpack(self):
-        unpacked = pd.DataFrame()
+    def unpack(self, discrete_p=0.05):
+        continuous = {}
+        discrete = {}
         for name, fit in self.fit.items():
-            # Make multiindex
-            df = self.top_table(fit, p_value=1)
+            continuous[name] = self.top_table(fit, p_value=1)
+            discrete[name] = self.decide_tests(fit, p_value=discrete_p)
 
+        # It's inefficient to loop through several times.
+        discrete = self.concat_to_mi(discrete)
+        continuous = self.concat_to_mi(continuous)
+        return discrete, continuous
+
+    @staticmethod
+    def concat_to_mi(fit_dict):
+        unpacked = pd.DataFrame()
+        for name, fit in fit_dict.items():
             # Make tuples specifiying the levels and labels
-            col_names = df.columns.values
+            col_names = fit.columns.values
             fit_name = [name] * len(col_names)
             idx_tuples = list(zip(fit_name, col_names))
-            df.columns = pd.MultiIndex.from_tuples(idx_tuples, names=['Fit', 'Value'])
+            fit.columns = pd.MultiIndex.from_tuples(idx_tuples, names=['Fit', 'Value'])
 
             # Add this fit to the running list
-            unpacked = pd.concat([unpacked, df], axis=1)
-        print(unpacked.filter(['adj_pval']))
+            unpacked = pd.concat([unpacked, fit], axis=1)
+        return unpacked
 
     @staticmethod
     def top_table(fit, use_fstat=None, p_value=0.05, n='inf', **kwargs) -> pd.DataFrame:
@@ -516,4 +509,13 @@ class DEResults(object):
         df.columns = df_cols
         df['-log10p'] = -np.log10(df['adj_pval'])
 
+        return df
+
+    @staticmethod
+    def decide_tests(fit_obj, method='global', **kwargs):
+        # Run decide tests
+        decide = limma.decideTests(fit_obj.robj, method=method, **kwargs)
+
+        # Convert to dataframe
+        df = rh.rvect_to_py(decide)
         return df
