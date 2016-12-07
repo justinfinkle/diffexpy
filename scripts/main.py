@@ -28,7 +28,7 @@ gene = 'TUBB2B'
 
 dea.fit_contrasts([dea.expected_contrasts['KO_ar-WT_ar'], dea.expected_contrasts['KO_ts']], names=['AR', 'KO_ts'])
 idx = pd.IndexSlice
-print(dea.results.continuous.loc[:, idx[['AR', 'KO_ts'], ['F']]])
+print(dea.results.discrete.head())
 sys.exit()
 print(dea.top_table(n=5))
 print(dea.decide_tests(dea.fit).loc[gene])

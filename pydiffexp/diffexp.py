@@ -518,5 +518,5 @@ class DEResults(object):
         decide = limma.decideTests(fit_obj.robj, method=method, **kwargs)
 
         # Convert to dataframe
-        df = rh.rvect_to_py(decide)
+        df = rh.rvect_to_py(decide).astype(int)
         return df
