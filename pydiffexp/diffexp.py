@@ -436,39 +436,67 @@ class DEResults(object):
     """
     Class intended to organize results from differential expression analysis in easier fashion
     """
-    def __init__(self, fit_dict, discrete_p=0.05):
-        self.fit = fit_dict                         # type: dict
-        self.discrete = None                        # type: pd.DataFrame
-        self.continuous = None                      # type: pd.DataFrame
+    def __init__(self, fit_dict, discrete_p=0.05, discrete_lfc=0, continuous_p=1):
+        self.fit = fit_dict                                                             # type: dict
+        self.discrete = self.discrete_results(p_value=discrete_p, lfc=discrete_lfc)     # type: pd.DataFrame
+        self.continuous = self.continuous_results(p_value=continuous_p)                 # type: pd.DataFrame
 
-        self.discrete, self.continuous = self.unpack(discrete_p=discrete_p)
+    def continuous_results(self, p_value=1, join='inner', **kwargs):
+        """
+        Throw results of multiple fits into a multiindex dataframe
+        :param p_value: float; 1 will return all results
+        :param join: str; the type of union for df indices. 'inner' (Default) drops indices (genes) that aren't shared
+        between fits. Useful when p_value is <1 and insignificant indices are dropped by top_table
+        :param kwargs:
+        :return:
+        """
+        # Initialize a dataframe for all the results
+        results = pd.DataFrame()
 
-    def unpack(self, discrete_p=0.05):
-        continuous = {}
-        discrete = {}
+        # For each fit that was conducted, make it a multiindex with the fit name as a llevel
         for name, fit in self.fit.items():
-            continuous[name] = self.top_table(fit, p_value=1)
-            discrete[name] = self.decide_tests(fit, p_value=discrete_p)
+            df = self.top_table(fit, p_value=p_value, **kwargs)
+            results = self.concat_to_mi(name, results, df, join=join)
+        results.sort_index(axis=1, inplace=True)
+        return results
 
-        # It's inefficient to loop through several times.
-        discrete = self.concat_to_mi(discrete)
-        continuous = self.concat_to_mi(continuous)
-        return discrete, continuous
+    def discrete_results(self, p_value=0.05, lfc=0, **kwargs):
+        """
+        Throw results of multiple fits into a multiindex dataframe
+        :param p_value:
+        :param lfc:
+        :param kwargs:
+        :return:
+        """
+        # Initialize a dataframe for all the results
+        results = pd.DataFrame()
+
+        # For each fit that was conducted, make it a multiindex with the fit name as a llevel
+        for name, fit in self.fit.items():
+            df = self.decide_tests(fit, p_value=p_value, lfc=lfc, **kwargs)
+            results = self.concat_to_mi(name, results, df)
+        results.sort_index(axis=1, inplace=True)
+        return results
 
     @staticmethod
-    def concat_to_mi(fit_dict):
-        unpacked = pd.DataFrame()
-        for name, fit in fit_dict.items():
-            # Make tuples specifiying the levels and labels
-            col_names = fit.columns.values
-            fit_name = [name] * len(col_names)
-            idx_tuples = list(zip(fit_name, col_names))
-            fit.columns = pd.MultiIndex.from_tuples(idx_tuples, names=['Fit', 'Value'])
+    def concat_to_mi(name, df, df_new, join='inner'):
+        """
+        Add multiindex of one fit to an existing tally. To prevent column duplication a Fit level is added
+        :param name:
+        :param df:
+        :param df_new:
+        :param join: str; specify how indices are combined.
+        :return:
+        """
+        # Make tuples specifiying the levels and labels
+        col_names = df_new.columns.values
+        fit_name = [name] * len(col_names)
+        idx_tuples = list(zip(fit_name, col_names))
+        df_new.columns = pd.MultiIndex.from_tuples(idx_tuples, names=['Fit', 'Value'])
 
-            # Add this fit to the running list
-            unpacked = pd.concat([unpacked, fit], axis=1)
-        unpacked.sort_index(axis=1, inplace=True)
-        return unpacked
+        # Add this fit to the running list
+        df = pd.concat([df, df_new], axis=1, join=join)
+        return df
 
     @staticmethod
     def top_table(fit, use_fstat=None, p_value=0.05, n='inf', **kwargs) -> pd.DataFrame:
