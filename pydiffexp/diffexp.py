@@ -307,9 +307,6 @@ class DEAnalysis(object):
         linear_fit = limma.lmFit(self.data_matrix, self.design)
         fit = self._ebayes(linear_fit, contrast_robj)
 
-        # Return the fit as DEResults
-        fit = DEResults(fit)
-
         return fit
 
     def _fit_dict(self, names: list, contrasts: list):
@@ -322,7 +319,7 @@ class DEAnalysis(object):
         """
 
         # Make fit dictionary
-        fits = {name: self._fit_contrast(contrast) for name, contrast in zip(names, contrasts)}
+        fits = {name: DEResults(self._fit_contrast(contrast), name=name) for name, contrast in zip(names, contrasts)}
         return fits
 
     def fit_contrasts(self, contrasts, names=None):
