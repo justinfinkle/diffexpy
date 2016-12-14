@@ -25,10 +25,21 @@ gene = 'TUBB2B'
 # dea.fit_contrasts(dea.expected_contrasts['KO-WT'])
 # print(dea.top_table())
 # print(dea.decide_tests(dea.fit).loc[gene])
-
 dea.fit_contrasts([dea.expected_contrasts['KO_ar-WT_ar'], dea.expected_contrasts['KO_ts']], names=['AR', 'KO_ts'])
+sys.exit()
+
 idx = pd.IndexSlice
-print(dea.results.continuous_results(p_value=0.001))
+# d = dea.results.continuous
+# print(d[(d[idx['AR', 'F']]>20) & (d[idx['KO_ts', 'pval']]<0.001)])
+# sys.exit()
+
+a = dea.results.top_table(dea.results.fit['AR'])
+b = dea.results.decide_tests(dea.results.fit['AR'])
+x = b.loc[a.index.values[:10]]
+plt.plot([1,2,3,4], x.values.T)
+plt.show()
+
+
 sys.exit()
 print(dea.top_table(n=5))
 print(dea.decide_tests(dea.fit).loc[gene])

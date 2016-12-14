@@ -18,6 +18,9 @@ rpy2.robjects.numpy2ri.activate()
 limma = importr('limma')
 stats = importr('stats')
 
+# Set null variable
+null = robjects.r("NULL")
+
 
 class DEAnalysis(object):
     """
@@ -345,7 +348,8 @@ class DEAnalysis(object):
 
         # Make fit dictionary
         fits = {name: self._fit_contrast(contrast) for name, contrast in zip(names, contrasts)}
-        self.results = DEResults(fits)
+        for name, fit in fits.items():
+            results = DEResults(fit)
 
     def to_pickle(self, path):
         # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame
@@ -436,83 +440,32 @@ class DEResults(object):
     """
     Class intended to organize results from differential expression analysis in easier fashion
     """
-    def __init__(self, fit_dict, discrete_p=0.05, discrete_lfc=0, continuous_p=1):
-        self.fit = fit_dict                                                             # type: dict
-        self.discrete = self.discrete_results(p_value=discrete_p, lfc=discrete_lfc)     # type: pd.DataFrame
-        self.continuous = self.continuous_results(p_value=continuous_p)                 # type: pd.DataFrame
+    def __init__(self, fit):
+        self.fit = fit                                                                  # type: MArrayLM
+        self.type = None                                                                # type; str
+        self.continuous_kwargs = {'coef': null, "number": 10, 'genelist': null,
+                                  "adjust_method": "BH", "sort_by": "B", "resort_by": null,
+                                  "p_value": 0.05, "lfc": 0, "confint": False}          # type: dict
+        self.discrete_kwargs = {'method': 'separate', 'adjust_method': 'BH',
+                                'p_value': 0.05, 'lfc': 0}                              # type: dict
+        self.continuous = self.top_table(fit, **self.continuous_kwargs)                 # type: pd.DataFrame
+        self.discrete = self.decide_tests(fit, **self.discrete_kwargs)                  # type: pd.DataFrame
 
-    def continuous_results(self, p_value=1, join='inner', **kwargs):
-        """
-        Throw results of multiple fits into a multiindex dataframe
-        :param p_value: float; 1 will return all results
-        :param join: str; the type of union for df indices. 'inner' (Default) drops indices (genes) that aren't shared
-        between fits. Useful when p_value is <1 and insignificant indices are dropped by top_table
-        :param kwargs:
-        :return:
-        """
-        # Initialize a dataframe for all the results
-        results = pd.DataFrame()
-
-        # For each fit that was conducted, make it a multiindex with the fit name as a llevel
-        for name, fit in self.fit.items():
-            df = self.top_table(fit, p_value=p_value, **kwargs)
-            results = self.concat_to_mi(name, results, df, join=join)
-        results.sort_index(axis=1, inplace=True)
-        return results
-
-    def discrete_results(self, p_value=0.05, lfc=0, **kwargs):
-        """
-        Throw results of multiple fits into a multiindex dataframe
-        :param p_value:
-        :param lfc:
-        :param kwargs:
-        :return:
-        """
-        # Initialize a dataframe for all the results
-        results = pd.DataFrame()
-
-        # For each fit that was conducted, make it a multiindex with the fit name as a llevel
-        for name, fit in self.fit.items():
-            df = self.decide_tests(fit, p_value=p_value, lfc=lfc, **kwargs)
-            results = self.concat_to_mi(name, results, df)
-        results.sort_index(axis=1, inplace=True)
-        return results
-
-    @staticmethod
-    def concat_to_mi(name, df, df_new, join='inner'):
-        """
-        Add multiindex of one fit to an existing tally. To prevent column duplication a Fit level is added
-        :param name:
-        :param df:
-        :param df_new:
-        :param join: str; specify how indices are combined.
-        :return:
-        """
-        # Make tuples specifiying the levels and labels
-        col_names = df_new.columns.values
-        fit_name = [name] * len(col_names)
-        idx_tuples = list(zip(fit_name, col_names))
-        df_new.columns = pd.MultiIndex.from_tuples(idx_tuples, names=['Fit', 'Value'])
-
-        # Add this fit to the running list
-        df = pd.concat([df, df_new], axis=1, join=join)
-        return df
-
-    @staticmethod
-    def top_table(fit, use_fstat=None, p_value=0.05, n='inf', **kwargs) -> pd.DataFrame:
+    def top_table(self, fit, use_fstat=None, p=1, n='inf', **kwargs) -> pd.DataFrame:
         """
         Print top_table of differential expression analysis
         :param fit: MArrayLM; a fit object created by DEAnalysis
         :param use_fstat: bool; select genes using F-statistic. Useful if testing significance for multiple contrasts,
         such as a time series
-        :param p_value float; cutoff for significant top_table. Default is 0.05. If np.inf, then no cutoff is applied
+        :param p float; cutoff for significant top_table. Default is 0.05. If np.inf, then no cutoff is applied
         :param n int or 'inf'; number of significant top_table to include in output. Default is 'inf' which includes all
         top_table passing the threshold
         :param kwargs: additional arguments to pass to topTable. see topTable documentation in R for more details.
         :return:
         """
+
         # Update kwargs with commonly used ones provided in this API
-        kwargs = dict(kwargs, p_value=p_value, n=n)
+        kwargs = dict(kwargs, p_value=p, number=n)
 
         # Pull contrasts from MArrayLM
         contrasts = fit.contrasts.columns.values
@@ -523,11 +476,21 @@ class DEResults(object):
                                   (isinstance(contrasts, list) and len(contrasts) > 1)) else True
 
         if use_fstat:
-            if 'coef' in kwargs.keys():
-                raise ValueError('Cannot specify value for argument "coef" when using F statistic for topTableF')
+            # Modify parameters for use with topTableF
+            kwargs['sort_by'] = 'F'
+            if kwargs['coef'] != null:
+                warnings.warn('Cannot specify value for argument "coef" when using F statistic for topTableF. '
+                              'The value will be dropped')
+            # Drop values that won't be used by topTableF
+            for k in ['coef', 'resort_by', 'confint']:
+                del kwargs[k]
             table = limma.topTableF(fit.robj, **kwargs)
         else:
             table = limma.topTable(fit.robj, **kwargs)
+
+        # Add use_fstat
+        kwargs = dict(kwargs, use_fstat=use_fstat)
+        self.continuous_kwargs = kwargs
 
         df = rh.rvect_to_py(table)
 
@@ -540,10 +503,14 @@ class DEResults(object):
 
         return df
 
-    @staticmethod
-    def decide_tests(fit_obj, method='global', **kwargs):
+    def decide_tests(self, fit_obj, m='global', **kwargs) -> pd.DataFrame:
+        # Update kwargs with commonly used ones provided in this API
+        kwargs = dict(kwargs, method=m)
+
         # Run decide tests
-        decide = limma.decideTests(fit_obj.robj, method=method, **kwargs)
+        decide = limma.decideTests(fit_obj.robj, **kwargs)
+
+        self.discrete_kwargs = kwargs
 
         # Convert to dataframe
         df = rh.rvect_to_py(decide).astype(int)
