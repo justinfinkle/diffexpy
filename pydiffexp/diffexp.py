@@ -1,5 +1,5 @@
 import os, sys, warnings, itertools
-from collections import Counter
+from typing import Dict
 import numpy as np
 import pandas as pd
 import rpy2.robjects as robjects
@@ -53,7 +53,7 @@ class DEAnalysis(object):
         self.data_matrix = None             # type: robjects.vectors.Matrix
         self.contrast_robj = None           # type: robjects.vectors.Matrix
         self.fit = None                     # type: dict
-        self.results = None                 # type: DEResults
+        self.results = None                 # type: Dict[str, DEResults]
         self.decide = None                  # type: pd.DataFrame
 
         if df is not None:
@@ -273,12 +273,10 @@ class DEAnalysis(object):
         """
         # If the contrasts are a dictionary they need to be unpacked as kwargs
         if isinstance(contrasts, dict):
-            contrast_obj = limma.makeContrasts(**contrasts,
-                                                    levels=levels)
+            contrast_obj = limma.makeContrasts(**contrasts, levels=levels)
         # A string or list of strings can be passed directly
         else:
-            contrast_obj = limma.makeContrasts(contrasts=contrasts,
-                                                    levels=levels)
+            contrast_obj = limma.makeContrasts(contrasts=contrasts, levels=levels)
         return contrast_obj
 
     @staticmethod
@@ -290,8 +288,8 @@ class DEAnalysis(object):
             containing contrasts.
         :return:
         """
-        contrast_fit = limma.contrasts_fit(fit=fit_obj.robj, contrasts=contrast_obj)
-        bayes_fit = MArrayLM(limma.eBayes(contrast_fit))
+        contrast_fit = limma.contrasts_fit(fit=fit_obj, contrasts=contrast_obj)
+        bayes_fit = limma.eBayes(contrast_fit)
         return bayes_fit
 
     def _fit_contrast(self, contrast):
@@ -307,10 +305,25 @@ class DEAnalysis(object):
 
         # Perform a linear fit_contrasts, then empirical bayes fit_contrasts
         linear_fit = limma.lmFit(self.data_matrix, self.design)
-        linear_fit = MArrayLM(linear_fit)
         fit = self._ebayes(linear_fit, contrast_robj)
 
+        # Return the fit as DEResults
+        fit = DEResults(fit)
+
         return fit
+
+    def _fit_dict(self, names: list, contrasts: list):
+        """
+        Make the fits into a dictionary. This is wrapped into a function for type hinting
+        :param self:
+        :param names:
+        :param contrasts:
+        :return:
+        """
+
+        # Make fit dictionary
+        fits = {name: self._fit_contrast(contrast) for name, contrast in zip(names, contrasts)}
+        return fits
 
     def fit_contrasts(self, contrasts, names=None):
         """
@@ -346,10 +359,7 @@ class DEAnalysis(object):
         if n_fits == 1:
             contrasts = [contrasts]
 
-        # Make fit dictionary
-        fits = {name: self._fit_contrast(contrast) for name, contrast in zip(names, contrasts)}
-        for name, fit in fits.items():
-            results = DEResults(fit)
+        self.results = self._fit_dict(names, contrasts)
 
     def to_pickle(self, path):
         # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame
@@ -387,6 +397,10 @@ class DEAnalysis(object):
 class MArrayLM(object):
     """
     Class to wrap MArrayLM from R. Makes data more easily accessible
+
+    Note: This will probably never be directly instantiated because DEResults inherits from and extends upon
+    this base class
+
     """
     def __init__(self, obj):
         """
@@ -421,8 +435,9 @@ class MArrayLM(object):
         self.t = None                   # type: pd.DataFrame
         self.var_prior = None           # type: float
 
-        # Unpact the values
+        # Unpack the values
         self.unpack()
+        self.contrast_list = self.contrasts.columns.values
 
     def unpack(self):
         """
@@ -436,22 +451,25 @@ class MArrayLM(object):
             setattr(self, k, v)
 
 
-class DEResults(object):
+class DEResults(MArrayLM):
     """
     Class intended to organize results from differential expression analysis in easier fashion
     """
-    def __init__(self, fit):
-        self.fit = fit                                                                  # type: MArrayLM
-        self.type = None                                                                # type; str
+    def __init__(self, fit, name=None, type=None):
+        # Call super
+        super(DEResults, self).__init__(fit)
+
+        self.name = name                                                                # type: str
+        self.type = type                                                                # type: str
         self.continuous_kwargs = {'coef': null, "number": 10, 'genelist': null,
                                   "adjust_method": "BH", "sort_by": "B", "resort_by": null,
                                   "p_value": 0.05, "lfc": 0, "confint": False}          # type: dict
         self.discrete_kwargs = {'method': 'separate', 'adjust_method': 'BH',
                                 'p_value': 0.05, 'lfc': 0}                              # type: dict
-        self.continuous = self.top_table(fit, **self.continuous_kwargs)                 # type: pd.DataFrame
-        self.discrete = self.decide_tests(fit, **self.discrete_kwargs)                  # type: pd.DataFrame
+        self.continuous = self.top_table(**self.continuous_kwargs)                      # type: pd.DataFrame
+        self.discrete = self.decide_tests(**self.discrete_kwargs)                       # type: pd.DataFrame
 
-    def top_table(self, fit, use_fstat=None, p=1, n='inf', **kwargs) -> pd.DataFrame:
+    def top_table(self, use_fstat=None, p=1, n='inf', **kwargs) -> pd.DataFrame:
         """
         Print top_table of differential expression analysis
         :param fit: MArrayLM; a fit object created by DEAnalysis
@@ -467,13 +485,10 @@ class DEResults(object):
         # Update kwargs with commonly used ones provided in this API
         kwargs = dict(kwargs, p_value=p, number=n)
 
-        # Pull contrasts from MArrayLM
-        contrasts = fit.contrasts.columns.values
-
         # Use fstat if multiple contrasts supplied
         if use_fstat is None:
-            use_fstat = False if (isinstance(contrasts, str) or
-                                  (isinstance(contrasts, list) and len(contrasts) > 1)) else True
+            use_fstat = False if (isinstance(self.contrast_list, str) or
+                                  (isinstance(self.contrast_list, list) and len(self.contrast_list) == 1)) else True
 
         if use_fstat:
             # Modify parameters for use with topTableF
@@ -484,9 +499,9 @@ class DEResults(object):
             # Drop values that won't be used by topTableF
             for k in ['coef', 'resort_by', 'confint']:
                 del kwargs[k]
-            table = limma.topTableF(fit.robj, **kwargs)
+            table = limma.topTableF(self.robj, **kwargs)
         else:
-            table = limma.topTable(fit.robj, **kwargs)
+            table = limma.topTable(self.robj, **kwargs)
 
         # Add use_fstat
         kwargs = dict(kwargs, use_fstat=use_fstat)
@@ -497,18 +512,18 @@ class DEResults(object):
         # Rename the column and add the negative log10 values
         df.rename(columns={'adj.P.Val': 'adj_pval', 'P.Value': 'pval'}, inplace=True)  # Remove expected periods
         df_cols = df.columns.values.tolist()
-        df_cols[:len(contrasts)] = contrasts
+        df_cols[:len(self.contrast_list)] = self.contrast_list
         df.columns = df_cols
         df['-log10p'] = -np.log10(df['adj_pval'])
 
         return df
 
-    def decide_tests(self, fit_obj, m='global', **kwargs) -> pd.DataFrame:
+    def decide_tests(self, m='global', **kwargs) -> pd.DataFrame:
         # Update kwargs with commonly used ones provided in this API
         kwargs = dict(kwargs, method=m)
 
         # Run decide tests
-        decide = limma.decideTests(fit_obj.robj, **kwargs)
+        decide = limma.decideTests(self.robj, **kwargs)
 
         self.discrete_kwargs = kwargs
 
