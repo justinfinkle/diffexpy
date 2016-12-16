@@ -116,9 +116,20 @@ class DEAnalysis(object):
         :param p_idx: int; the index of the time sample when the perturbation was applied
         :return:
         """
+
+        '''
+        Contrast classes - DE, TS, AR, TS-DE, DE-TS, AR-DE, DE-AR
+        DE: Differential Expression
+        TS: Time Series
+        AR: Autoregression
+        '''
+
         if self.timeseries:
+            # List of condition pairs
             conditions_permutes = list(itertools.product(self.conditions, repeat=2))
             contrasts = {}
+
+            # Build basic contrasts
             for c in conditions_permutes:
                 # Time series
                 if c[0] == c[1]:
@@ -129,7 +140,6 @@ class DEAnalysis(object):
                     # Autoregression
                     contrasts[str(x) + '_ar'] = (list(map('-'.join, zip(samples[1:],
                                                                         [samples[p_idx]]*(len(samples)-1)))))
-
                 # Static
                 else:
                     contrasts[c[0] + '-' + c[1]] = list(
@@ -452,12 +462,12 @@ class DEResults(MArrayLM):
     """
     Class intended to organize results from differential expression analysis in easier fashion
     """
-    def __init__(self, fit, name=None, type=None):
+    def __init__(self, fit, name=None, fit_type=None):
         # Call super
         super(DEResults, self).__init__(fit)
 
         self.name = name                                                                # type: str
-        self.type = type                                                                # type: str
+        self.fit_type = fit_type                                                        # type: str
         self.continuous_kwargs = {'coef': null, "number": 10, 'genelist': null,
                                   "adjust_method": "BH", "sort_by": "B", "resort_by": null,
                                   "p_value": 0.05, "lfc": 0, "confint": False}          # type: dict
@@ -516,6 +526,13 @@ class DEResults(MArrayLM):
         return df
 
     def decide_tests(self, m='global', **kwargs) -> pd.DataFrame:
+        """
+        Determine if each gene is significantly differentially expressed based on criteria. Returns discrete values.
+
+        :param m: str; Method used for multiple hypothesis testing. See R documentation for more details.
+        :param kwargs: Additional keyword arguments available in R.
+        :return: DataFrame; 1 for overexpressed, -1 for underexpressed, 0 if not significantly different.
+        """
         # Update kwargs with commonly used ones provided in this API
         kwargs = dict(kwargs, method=m)
 

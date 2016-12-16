@@ -22,9 +22,9 @@ dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition',
 # Find differential expression at each time point
 gene = 'TUBB2B'
 
-# dea.fit_contrasts(dea.expected_contrasts['KO-WT'])
-# print(dea.top_table())
-# print(dea.decide_tests(dea.fit).loc[gene])
+print(dea.possible_contrasts())
+sys.exit()
+
 dea.fit_contrasts([dea.expected_contrasts['KO_ar-WT_ar'], dea.expected_contrasts['KO_ts']], names=['AR', 'KO_ts'])
 sys.exit()
 
