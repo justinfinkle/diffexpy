@@ -131,59 +131,56 @@ class DEAnalysis(object):
         '''
 
         if self.timeseries:
+            # Labels to append to keys to signify contrast type
+            ts_str = '_ts'
+            ar_str = '_ar'
+
             # List of condition pairs
-            conditions_permutes = list(itertools.product(self.conditions, repeat=2))
+            condition_combos = list(itertools.combinations_with_replacement(self.conditions, 2))
             contrasts = {}
 
             # Build basic contrasts
-            for c in conditions_permutes:
+            for c in condition_combos:
                 # Time series
                 if c[0] == c[1]:
                     x = c[0]
-                    samples = grepl(self.samples, x)
-                    contrasts[str(x) + '_ts'] = self._contrast(samples[1:], samples[:-1], 'TS')
+                    samples = grepl(x, self.samples)
+                    contrasts[str(x) + ts_str] = self._contrast(samples[1:], samples[:-1], 'TS')
 
                     # Autoregression
                     ar_samples = [samples[p_idx]] * (len(samples) - 1)
-                    contrasts[str(x) + '_ar'] = self._contrast(samples[1:], ar_samples, 'AR')
+                    contrasts[str(x) + ar_str] = self._contrast(samples[1:], ar_samples, 'AR')
+
                 # Static
                 else:
-                    contrasts['-'.join(c)] = self._contrast(grepl(self.samples, c[0]), grepl(self.samples, c[1]), 'DE')
+                    contrasts['-'.join(c)] = self._contrast(grepl(c[0], self.samples), grepl(c[1], self.samples), 'DE')
 
             # Make complex contrasts
             # TS-DE labels
-            diffs = list(itertools.permutations(grepl(contrasts.keys(), '_ts'), 2))
+
+            diffs = list(itertools.permutations(grepl(ts_str, contrasts.keys()), 2))
             # Add TS-AR labels
-            diffs += list(itertools.permutations(grepl(contrasts.keys(), '_ar'), 2))
+            diffs += list(itertools.permutations(grepl(ar_str, contrasts.keys()), 2))
 
             # Labels used for DE-TS and DE-AR
-            de_diffs = grepl(contrasts.keys(), '-')
+            de_diffs = grepl('-', contrasts.keys())
 
             for diff in diffs:
                 ts1 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[0]]['contrasts']))
                 ts2 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[1]]['contrasts']))
-                fit_type = 'TS-DE' if '_ts' in diff[0] else 'AR-DE'
+                fit_type = 'TS-DE' if ts_str in diff[0] else 'AR-DE'
                 contrasts['-'.join(diff)] = self._contrast(ts1, ts2, fit_type=fit_type)
 
             # Now add DE-TS and DE-AR
+
             for de in de_diffs:
                 # DE-TS
-                contrasts["(%s)_ts" %de] = self._contrast
-                print("(%s)_ts" %de)
+                base_de = list(map(lambda contrast: '(%s)' % contrast, contrasts[de]['contrasts']))
+                contrasts["(%s)_ts" % de] = self._contrast(base_de[1:], base_de[:-1], fit_type='DE-TS')
 
-            # print(list(zip(contrasts[de_diffs[0]]['contrasts'][1:], contrasts[de_diffs[0]]['contrasts'][:-1])))
-
-
-
-            # # Diff of diffs (KO_i-KO_i-1)-(WT_i-WT_i-1)
-            # for diff in diffs:
-            #     ts1 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[0]]))
-            #     ts2 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[1]]))
-            #     contrasts['-'.join(diff)] = [contrast for contrast in map('-'.join, zip(ts1, ts2))]
-            # for ar_diff in ar_diffs:
-            #     ts1 = list(map(lambda contrast: '(%s)' % contrast, contrasts[ar_diff[0]]))
-            #     ts2 = list(map(lambda contrast: '(%s)' % contrast, contrasts[ar_diff[1]]))
-            #     contrasts['-'.join(ar_diff)] = [contrast for contrast in map('-'.join, zip(ts1, ts2))]
+                # DE-AR
+                ar_de = [base_de[0]] * (len(base_de) - 1)
+                contrasts["(%s)_ar" % de] = self._contrast(base_de[1:], ar_de, fit_type='DE-AR')
             expected_contrasts = contrasts
         else:
             expected_contrasts = list(map('-'.join, itertools.permutations(self.conditions, 2)))

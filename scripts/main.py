@@ -22,7 +22,7 @@ dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition',
 # Find differential expression at each time point
 gene = 'CTPS'
 
-print(dea.possible_contrasts())
+dea.suggest_contrasts()
 sys.exit()
 
 dea.fit_contrasts([dea.expected_contrasts['KO_ar-WT_ar'], dea.expected_contrasts['KO_ts']], names=['AR', 'KO_ts'])
