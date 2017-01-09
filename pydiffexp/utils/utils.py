@@ -9,8 +9,13 @@ def grepl(substr, search_list):
 
 # Overloaded function to handle list of strings as well
 @grepl.register(list)
-def _(str_list, search_list):
+def _(str_list, search_list, flat=True):
     grep_list = [grepl(substr, search_list) for substr in str_list]
+
+    # Flatten the list of lists
+    if flat:
+        grep_list = [item for sublist in grep_list for item in sublist]
+
     return grep_list
 
 
