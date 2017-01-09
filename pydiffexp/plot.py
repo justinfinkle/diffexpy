@@ -122,7 +122,8 @@ def add_ts(ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None,
 
 def tsplot(df, supergroup='condition', subgroup='time'):
     gene = df.name
-    supers = set(df.index.get_level_values(supergroup))
+    supers = sorted(list(set(df.index.get_level_values(supergroup))))
+    print(supers)
     fig, ax = plt.subplots()
     ax.set_prop_cycle(cycler('color', _colors))
     for sup in supers:
