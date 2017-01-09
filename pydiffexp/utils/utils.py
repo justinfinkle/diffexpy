@@ -1,5 +1,16 @@
-def grepl(search_list, substr):
+from functools import singledispatch
+
+
+@singledispatch
+def grepl(substr, search_list):
     grep_list = list(filter(lambda x: substr in x, search_list))
+    return grep_list
+
+
+# Overloaded function to handle list of strings as well
+@grepl.register(list)
+def _(str_list, search_list):
+    grep_list = [grepl(substr, search_list) for substr in str_list]
     return grep_list
 
 
