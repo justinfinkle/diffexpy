@@ -20,7 +20,7 @@ dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition',
 
 
 # Find differential expression at each time point
-gene = 'TUBB2B'
+gene = 'CTPS'
 
 print(dea.possible_contrasts())
 sys.exit()
