@@ -50,7 +50,7 @@ idx = pd.IndexSlice
 
 # print(dea.expected_contrasts['KO-WT'])
 
-dea.fit(dea.expected_contrasts['WT_ts'])
+dea.fit(dea.default_contrasts['WT_ts'])
 # print(dea.top_table().head())
 dea.decide = dea.decide_tests(dea.fit, p_value=0.01)
 # print(dea.decide.iloc[gene])

@@ -22,6 +22,151 @@ stats = importr('stats')
 null = robjects.r("NULL")
 
 
+class MArrayLM(object):
+    """
+    Class to wrap MArrayLM from R. Makes data more easily accessible
+
+    Note: This will probably never be directly instantiated because DEResults inherits from and extends upon
+    this base class
+
+    """
+    def __init__(self, obj):
+        """
+
+        :param obj:
+        """
+        # Store the original object
+        self.robj = obj                 # type: robj.vectors.ListVector
+
+        # Initialize expected attributes. See R documentation on MArrayLM for more details on attributes
+        self.Amean = None               # type: np.ndarray
+        self.F = None                   # type: np.ndarray
+        self.F_p_value = None           # type: np.ndarray
+        self.assign = None              # type: np.ndarray
+        self.coefficients = None        # type: pd.DataFrame
+        self.contrasts = None           # type: pd.DataFrame
+        self.cov_coefficients = None    # type: pd.DataFrame
+        self.design = None              # type: pd.DataFrame
+        self.df_prior = None            # type: float
+        self.df_residual = None         # type: np.ndarray
+        self.df_total = None            # type: np.ndarray
+        self.lods = None                # type: pd.DataFrame
+        self.method = None              # type: str
+        self.p_value = None             # type: pd.DataFrame
+        self.proportion = None          # type: float
+        self.qr = None                  # type: dict
+        self.rank = None                # type: int
+        self.s2_post = None             # type: np.ndarray
+        self.s2_prior = None            # type: float
+        self.sigma = None               # type: np.ndarray
+        self.stdev_unscaled = None      # type: pd.DataFrame
+        self.t = None                   # type: pd.DataFrame
+        self.var_prior = None           # type: float
+
+        # Unpack the values
+        self.unpack()
+        self.contrast_list = self.contrasts.columns.values
+
+    def unpack(self):
+        """
+        Unpack the MArrayLM object (rpy2 listvector) into an object.
+        """
+        # Unpack the list vector object
+        data = rh.unpack_r_listvector(self.robj)
+
+        # Store the values into attributes
+        for k, v in data.items():
+            setattr(self, k, v)
+
+
+class DEResults(MArrayLM):
+    """
+    Class intended to organize results from differential expression analysis in easier fashion
+    """
+    def __init__(self, fit, name=None, fit_type=None):
+        # Call super
+        super(DEResults, self).__init__(fit)
+
+        self.name = name                                                                # type: str
+        self.fit_type = fit_type                                                        # type: str
+        self.continuous_kwargs = {'coef': null, "number": 10, 'genelist': null,
+                                  "adjust_method": "BH", "sort_by": "B", "resort_by": null,
+                                  "p_value": 0.05, "lfc": 0, "confint": False}          # type: dict
+        self.discrete_kwargs = {'method': 'separate', 'adjust_method': 'BH',
+                                'p_value': 0.05, 'lfc': 0}                              # type: dict
+        self.continuous = self.top_table(**self.continuous_kwargs)                      # type: pd.DataFrame
+        self.discrete = self.decide_tests(**self.discrete_kwargs)                       # type: pd.DataFrame
+
+    def top_table(self, use_fstat=None, p=1, n='inf', **kwargs) -> pd.DataFrame:
+        """
+        Print top_table of differential expression analysis
+        :param fit: MArrayLM; a fit object created by DEAnalysis
+        :param use_fstat: bool; select genes using F-statistic. Useful if testing significance for multiple contrasts,
+        such as a time series
+        :param p float; cutoff for significant top_table. Default is 0.05. If np.inf, then no cutoff is applied
+        :param n int or 'inf'; number of significant top_table to include in output. Default is 'inf' which includes all
+        top_table passing the threshold
+        :param kwargs: additional arguments to pass to topTable. see topTable documentation in R for more details.
+        :return:
+        """
+
+        # Update kwargs with commonly used ones provided in this API
+        kwargs = dict(kwargs, p_value=p, number=n)
+
+        # Use fstat if multiple contrasts supplied
+        if use_fstat is None:
+            use_fstat = False if (isinstance(self.contrast_list, str) or
+                                  (isinstance(self.contrast_list, list) and len(self.contrast_list) == 1)) else True
+
+        if use_fstat:
+            # Modify parameters for use with topTableF
+            kwargs['sort_by'] = 'F'
+            if kwargs['coef'] != null:
+                warnings.warn('Cannot specify value for argument "coef" when using F statistic for topTableF. '
+                              'The value will be dropped')
+            # Drop values that won't be used by topTableF
+            for k in ['coef', 'resort_by', 'confint']:
+                del kwargs[k]
+            table = limma.topTableF(self.robj, **kwargs)
+        else:
+            table = limma.topTable(self.robj, **kwargs)
+
+        # Add use_fstat
+        kwargs = dict(kwargs, use_fstat=use_fstat)
+        self.continuous_kwargs = kwargs
+
+        df = rh.rvect_to_py(table)
+
+        # Rename the column and add the negative log10 values
+        df.rename(columns={'adj.P.Val': 'adj_pval', 'P.Value': 'pval'}, inplace=True)  # Remove expected periods
+        df_cols = df.columns.values.tolist()
+        df_cols[:len(self.contrast_list)] = self.contrast_list
+        df.columns = df_cols
+        df['-log10p'] = -np.log10(df['adj_pval'])
+
+        return df
+
+    def decide_tests(self, m='global', **kwargs) -> pd.DataFrame:
+        """
+        Determine if each gene is significantly differentially expressed based on criteria. Returns discrete values.
+
+        :param m: str; Method used for multiple hypothesis testing. See R documentation for more details.
+        :param kwargs: Additional keyword arguments available in R.
+        :return: DataFrame; 1 for overexpressed, -1 for underexpressed, 0 if not significantly different.
+        """
+        # Update kwargs with commonly used ones provided in this API
+        kwargs = dict(kwargs, method=m)
+
+        # Run decide tests
+        decide = limma.decideTests(self.robj, **kwargs)
+
+        self.discrete_kwargs = kwargs
+
+        # Convert to dataframe
+        df = rh.rvect_to_py(decide).astype(int)
+        return df
+
+
 class DEAnalysis(object):
     """
     An object that does differential expression analysis with time course data
@@ -45,7 +190,7 @@ class DEAnalysis(object):
         self.times = None                   # type: list
         self.conditions = None              # type: list
         self.replicates = None              # type: list
-        self.expected_contrasts = None
+        self.default_contrasts = None
         self.timeseries = False             # type: bool
         self.samples = None                 # type: list
         self.experiment_summary = None      # type: pd.DataFrame
@@ -63,7 +208,7 @@ class DEAnalysis(object):
                 if len(self.times) > 1:
                     self.timeseries = True
             self.conditions = sorted(list(set(self.experiment_summary[condition])))
-            self.expected_contrasts = self.possible_contrasts()
+            self.default_contrasts = self.possible_contrasts()
             self.replicates = sorted(list(set(self.experiment_summary[replicate])))
 
     def _set_data(self, df, index_names=None, split_str='_', reference_labels=None):
@@ -189,12 +334,12 @@ class DEAnalysis(object):
     def suggest_contrasts(self):
         print('Timeseries Data:', self.timeseries)
         print('ts = Timeseries contrasts, ar = Autoregressive contrasts \n')
-        if isinstance(self.expected_contrasts, dict):
-            sorted_keys = sorted(self.expected_contrasts.keys())
+        if isinstance(self.default_contrasts, dict):
+            sorted_keys = sorted(self.default_contrasts.keys())
             for k in sorted_keys:
-                print(k+":", self.expected_contrasts[k])
-        elif isinstance(self.expected_contrasts, list):
-            for c in self.expected_contrasts:
+                print(k +":", self.default_contrasts[k])
+        elif isinstance(self.default_contrasts, list):
+            for c in self.default_contrasts:
                 print(c)
 
     @staticmethod
@@ -343,7 +488,7 @@ class DEAnalysis(object):
 
         return fit
 
-    def _fit_dict(self, names: list, contrasts: list):
+    def _fit_dict(self, contrast_dict: dict) -> Dict[str, DEResults]:
         """
         Make the fits into a dictionary. This is wrapped into a function for type hinting
         :param self:
@@ -353,10 +498,11 @@ class DEAnalysis(object):
         """
 
         # Make fit dictionary
-        fits = {name: DEResults(self._fit_contrast(contrast), name=name) for name, contrast in zip(names, contrasts)}
+        fits = {name: DEResults(self._fit_contrast(contrast['contrasts']), name=name, fit_type=contrast['fit_type'])
+                for name, contrast in contrast_dict.items()}
         return fits
 
-    def fit_contrasts(self, contrasts, names=None):
+    def fit_contrasts(self, contrasts=None, names=None, fit_types=None, fit_defaults=True):
         """
         Wrapper to fit the differential expression model using the supplied contrasts.
 
@@ -371,26 +517,37 @@ class DEAnalysis(object):
         if self.data is None:
             raise ValueError('Please add data using set_data() before attempting to fit_contrasts.')
 
-        # Determine contrast type
-        n_fits = 1
-        if isinstance(contrasts, list):
-            n_strings = sum([isinstance(l, str) for l in contrasts])
+        # Initialize full contrast dictionary
+        all_contrasts = self.default_contrasts if fit_defaults else {}
 
-            # If all items in the list aren't strings, then it is likely multiple contrasts for independent fits
-            if n_strings != len(contrasts):
-                n_fits = len(contrasts)
+        if contrasts is not None:
+            # Determine contrast type
+            n_fits = 1
+            if isinstance(contrasts, list):
+                n_strings = sum([isinstance(l, str) for l in contrasts])
 
-        # Make a list of names
-        if names is None:
-            names = [str(n) for n in range(n_fits)]
-        elif isinstance(names, str):
-            names = [names]
+                # If all items in the list aren't strings, then it is likely multiple contrasts for independent fits
+                if n_strings != len(contrasts):
+                    n_fits = len(contrasts)
 
-        # Make sure the contrasts are also a list, for zipping
-        if n_fits == 1:
-            contrasts = [contrasts]
+            # Make a list of names
+            if names is None:
+                names = [str(n) for n in range(n_fits)]
+            elif isinstance(names, str):
+                names = [names]
 
-        self.results = self._fit_dict(names, contrasts)
+            # Make nested contrast dictionary to match format expected of default contrasts
+            user_contrasts = {name: {'contrasts': contrast, 'fit_type': None} for name, contrast in zip(names, contrasts)}
+
+            # Check if there are clashes and warn of override
+            key_clash = [key for key in user_contrasts.keys() if key in all_contrasts.keys()]
+            if key_clash:
+                warning = ("\nThe user contrasts: '%s' are in the default contrasts "
+                           "and will be overridden by the user values." % (','.join(key_clash)))
+                warnings.warn(warning)
+            all_contrasts = dict(all_contrasts, **user_contrasts)
+
+        self.results = self._fit_dict(all_contrasts)
 
     def to_pickle(self, path):
         # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame
@@ -423,148 +580,3 @@ class DEAnalysis(object):
                      "\nTo save object please rerun with a different file path or choose to rewrite")
 
         return
-
-
-class MArrayLM(object):
-    """
-    Class to wrap MArrayLM from R. Makes data more easily accessible
-
-    Note: This will probably never be directly instantiated because DEResults inherits from and extends upon
-    this base class
-
-    """
-    def __init__(self, obj):
-        """
-
-        :param obj:
-        """
-        # Store the original object
-        self.robj = obj                 # type: robj.vectors.ListVector
-
-        # Initialize expected attributes. See R documentation on MArrayLM for more details on attributes
-        self.Amean = None               # type: np.ndarray
-        self.F = None                   # type: np.ndarray
-        self.F_p_value = None           # type: np.ndarray
-        self.assign = None              # type: np.ndarray
-        self.coefficients = None        # type: pd.DataFrame
-        self.contrasts = None           # type: pd.DataFrame
-        self.cov_coefficients = None    # type: pd.DataFrame
-        self.design = None              # type: pd.DataFrame
-        self.df_prior = None            # type: float
-        self.df_residual = None         # type: np.ndarray
-        self.df_total = None            # type: np.ndarray
-        self.lods = None                # type: pd.DataFrame
-        self.method = None              # type: str
-        self.p_value = None             # type: pd.DataFrame
-        self.proportion = None          # type: float
-        self.qr = None                  # type: dict
-        self.rank = None                # type: int
-        self.s2_post = None             # type: np.ndarray
-        self.s2_prior = None            # type: float
-        self.sigma = None               # type: np.ndarray
-        self.stdev_unscaled = None      # type: pd.DataFrame
-        self.t = None                   # type: pd.DataFrame
-        self.var_prior = None           # type: float
-
-        # Unpack the values
-        self.unpack()
-        self.contrast_list = self.contrasts.columns.values
-
-    def unpack(self):
-        """
-        Unpack the MArrayLM object (rpy2 listvector) into an object.
-        """
-        # Unpack the list vector object
-        data = rh.unpack_r_listvector(self.robj)
-
-        # Store the values into attributes
-        for k, v in data.items():
-            setattr(self, k, v)
-
-
-class DEResults(MArrayLM):
-    """
-    Class intended to organize results from differential expression analysis in easier fashion
-    """
-    def __init__(self, fit, name=None, fit_type=None):
-        # Call super
-        super(DEResults, self).__init__(fit)
-
-        self.name = name                                                                # type: str
-        self.fit_type = fit_type                                                        # type: str
-        self.continuous_kwargs = {'coef': null, "number": 10, 'genelist': null,
-                                  "adjust_method": "BH", "sort_by": "B", "resort_by": null,
-                                  "p_value": 0.05, "lfc": 0, "confint": False}          # type: dict
-        self.discrete_kwargs = {'method': 'separate', 'adjust_method': 'BH',
-                                'p_value': 0.05, 'lfc': 0}                              # type: dict
-        self.continuous = self.top_table(**self.continuous_kwargs)                      # type: pd.DataFrame
-        self.discrete = self.decide_tests(**self.discrete_kwargs)                       # type: pd.DataFrame
-
-    def top_table(self, use_fstat=None, p=1, n='inf', **kwargs) -> pd.DataFrame:
-        """
-        Print top_table of differential expression analysis
-        :param fit: MArrayLM; a fit object created by DEAnalysis
-        :param use_fstat: bool; select genes using F-statistic. Useful if testing significance for multiple contrasts,
-        such as a time series
-        :param p float; cutoff for significant top_table. Default is 0.05. If np.inf, then no cutoff is applied
-        :param n int or 'inf'; number of significant top_table to include in output. Default is 'inf' which includes all
-        top_table passing the threshold
-        :param kwargs: additional arguments to pass to topTable. see topTable documentation in R for more details.
-        :return:
-        """
-
-        # Update kwargs with commonly used ones provided in this API
-        kwargs = dict(kwargs, p_value=p, number=n)
-
-        # Use fstat if multiple contrasts supplied
-        if use_fstat is None:
-            use_fstat = False if (isinstance(self.contrast_list, str) or
-                                  (isinstance(self.contrast_list, list) and len(self.contrast_list) == 1)) else True
-
-        if use_fstat:
-            # Modify parameters for use with topTableF
-            kwargs['sort_by'] = 'F'
-            if kwargs['coef'] != null:
-                warnings.warn('Cannot specify value for argument "coef" when using F statistic for topTableF. '
-                              'The value will be dropped')
-            # Drop values that won't be used by topTableF
-            for k in ['coef', 'resort_by', 'confint']:
-                del kwargs[k]
-            table = limma.topTableF(self.robj, **kwargs)
-        else:
-            table = limma.topTable(self.robj, **kwargs)
-
-        # Add use_fstat
-        kwargs = dict(kwargs, use_fstat=use_fstat)
-        self.continuous_kwargs = kwargs
-
-        df = rh.rvect_to_py(table)
-
-        # Rename the column and add the negative log10 values
-        df.rename(columns={'adj.P.Val': 'adj_pval', 'P.Value': 'pval'}, inplace=True)  # Remove expected periods
-        df_cols = df.columns.values.tolist()
-        df_cols[:len(self.contrast_list)] = self.contrast_list
-        df.columns = df_cols
-        df['-log10p'] = -np.log10(df['adj_pval'])
-
-        return df
-
-    def decide_tests(self, m='global', **kwargs) -> pd.DataFrame:
-        """
-        Determine if each gene is significantly differentially expressed based on criteria. Returns discrete values.
-
-        :param m: str; Method used for multiple hypothesis testing. See R documentation for more details.
-        :param kwargs: Additional keyword arguments available in R.
-        :return: DataFrame; 1 for overexpressed, -1 for underexpressed, 0 if not significantly different.
-        """
-        # Update kwargs with commonly used ones provided in this API
-        kwargs = dict(kwargs, method=m)
-
-        # Run decide tests
-        decide = limma.decideTests(self.robj, **kwargs)
-
-        self.discrete_kwargs = kwargs
-
-        # Convert to dataframe
-        df = rh.rvect_to_py(decide).astype(int)
-        return df
