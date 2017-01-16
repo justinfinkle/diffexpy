@@ -580,13 +580,3 @@ class DEAnalysis(object):
                      "\nTo save object please rerun with a different file path or choose to rewrite")
 
         return
-
-
-def read_dea_pickle(path) -> DEAnalysis:
-    """
-    Load a pickle as a
-    :param path: pickle path
-    :return:
-    """
-
-    return pd.read_pickle(path)

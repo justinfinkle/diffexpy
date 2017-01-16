@@ -1,6 +1,5 @@
 from functools import singledispatch
 
-
 @singledispatch
 def grepl(substr, search_list):
     grep_list = list(filter(lambda x: substr in x, search_list))
