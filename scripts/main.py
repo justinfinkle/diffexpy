@@ -1,105 +1,23 @@
-import sys, warnings
+"""
+This is a basic example that demonstrates how to load data, do a fit
+"""
+
 import pandas as pd
-import numpy as np
-from collections import Counter
-from pydiffexp import DEAnalysis, volcano_plot, tsplot, DEResults
-import pydiffexp.utils.multiindex_helpers as mi
-import pydiffexp.utils.rpy2_helpers as rh
-import discretized_clustering as dcluster
-import matplotlib.pyplot as plt
-from scipy import stats
+from pydiffexp import DEAnalysis
 
-pd.set_option('display.width', 1000)
-
+# Load the data
 test_path = "/Users/jfinkle/Documents/Northwestern/MoDyLS/Python/sprouty/data/raw_data/all_data_formatted.csv"
 raw_data = pd.read_csv(test_path, index_col=0)
 hierarchy = ['condition', 'well', 'time', 'replicate']
 
+# The example data has been background corrected, so set everything below 0 to a trivial positive value of 1
 raw_data[raw_data <= 0] = 1
+
+# Make the Differential Expression Analysis Object
+# The reference labels specify how samples will be organized into unique values
 dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition', 'time'])
 
-
-# Find differential expression at each time point
-gene = 'CTPS'
-
+# Fit the contrasts and save the object
 dea.fit_contrasts()
-sys.exit()
+dea.to_pickle("./sprouty_pickle.pkl")
 
-idx = pd.IndexSlice
-# d = dea.results.continuous
-# print(d[(d[idx['AR', 'F']]>20) & (d[idx['KO_ts', 'pval']]<0.001)])
-# sys.exit()
-
-a = dea.results.top_table(dea.results.fit['AR'])
-b = dea.results.decide_tests(dea.results.fit['AR'])
-x = b.loc[a.index.values[:10]]
-plt.plot([1,2,3,4], x.values.T)
-plt.show()
-
-
-sys.exit()
-print(dea.top_table(n=5))
-print(dea.decide_tests(dea.fit).loc[gene])
-
-dea.fit_contrasts(dea.expected_contrasts['KO_ar'])
-# r = dea.top_table()
-# plt.plot(dea.times[1:], r.iloc[:100, :4].T)
-print(dea.decide_tests(dea.fit).loc[gene])
-# plt.legend()
-
-dea.fit_contrasts(dea.expected_contrasts['WT_ar'])
-# r = dea.top_table()
-# plt.plot(dea.times[1:], r.iloc[:100, :4].T)
-print(dea.decide_tests(dea.fit).loc[gene])
-
-tsplot(dea.data.loc[gene])
-plt.show()
-
-sys.exit()
-# sys.exit()
-
-idx = pd.IndexSlice
-diffexp = dea.decide_tests(dea.fit)
-diffexp = mi.make_hierarchical(diffexp, ['num_c', 'num_t', 'denom_c', 'denom_t', 'original'], split_str='-|_', keep_original=True)
-dea.fit_contrasts(dea.expected_contrasts['WT_ts'])
-wt = mi.make_hierarchical(dea.decide_tests(dea.fit), ['num_c', 'num_t', 'denom_c', 'denom_t', 'original'], split_str='-|_', keep_original=True)
-dea.fit_contrasts(dea.expected_contrasts['KO_ts'])
-ko = mi.make_hierarchical(dea.decide_tests(dea.fit), ['num_c', 'num_t', 'denom_c', 'denom_t', 'original'], split_str='-|_', keep_original=True)
-all_tests = pd.DataFrame(pd.concat((diffexp, wt, ko), axis=1, keys=['diff', 'wt_ts', 'ko_ts'], names=['contrasts']+ko.columns.names))
-c = np.array([diffexp.index.values, [tuple(row) for row in diffexp.values], [tuple(row) for row in wt.values],
-              [tuple(row) for row in ko.values]]).T
-clusters = pd.DataFrame(c, columns=['gene', 'diff', 'wt', 'ko'])
-gene = 'AREG'
-
-clusters.set_index(['diff', 'wt', 'ko'], inplace=True)
-clusters.sort_index(inplace=True)
-print(clusters.loc[idx[(0,0,1,1,1)]])
-plt.figure()
-tsplot(dea.data.loc[gene])
-g = dea.data.loc[gene, idx['KO']]
-g = g.reset_index()
-g = g.groupby('time')
-g_ko = np.array([[g, np.mean(data[gene])] for g, data in g]).T
-
-
-g = dea.data.loc[gene, idx['WT']]
-g = g.reset_index()
-g = g.groupby('time')
-g_wt = np.array([[g, np.mean(data[gene])] for g, data in g]).T
-plt.plot(g_ko[0], g_ko[1]-g_wt[1])
-plt.show()
-sys.exit()
-tsplot(dea.data.loc['FEZ2'])
-plt.show()
-sys.exit()
-counts = clusters.groupby(level=[1]).count()
-counts.drop((0,0,0,0), inplace=True)
-plt.bar(range(len(counts)), counts.values)
-plt.xticks(range(len(counts)), ["_".join([str(x) for x in i]) for i in counts.index.values], rotation='vertical')
-plt.tight_layout()
-plt.show()
-sys.exit()
-nozeros = diffexp[(np.sum(np.abs(diffexp), axis=1)) == 5]
-n_changes = np.abs(np.sum(nozeros, axis=1))
-same = nozeros[n_changes == 5]
-print(len(nozeros), len(same))
