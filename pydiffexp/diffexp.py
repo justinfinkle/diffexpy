@@ -1,85 +1,159 @@
-import os, sys, itertools, warnings
+import os, sys, warnings, itertools
+from typing import Dict
 import numpy as np
 import pandas as pd
-from scipy import stats
 import rpy2.robjects as robjects
 import rpy2.robjects.numpy2ri
+from scipy.stats import zscore
 from rpy2.robjects.packages import importr
-from rpy2.robjects import pandas2ri, default_converter
-from rpy2.robjects.conversion import localconverter
+from pydiffexp.utils.utils import int_or_float, grepl
+import pydiffexp.utils.multiindex_helpers as mi
+import pydiffexp.utils.rpy2_helpers as rh
+from natsort import natsorted
+
+# Activate conversion
 rpy2.robjects.numpy2ri.activate()
 
+# Load R packages
+limma = importr('limma')
+stats = importr('stats')
 
-def is_multiindex(df):
+# Set null variable
+null = robjects.r("NULL")
+
+
+class MArrayLM(object):
     """
-    Function to determine if a dataframe is multiindex
-    :param df: dataframe
-    :return: tuple
-    """
-    mi = [False, False]
-    mi[0] = True if isinstance(df.index, pd.MultiIndex) else False
-    mi[1] = True if isinstance(df.columns, pd.MultiIndex) else False
-    return tuple(mi)
+    Class to wrap MArrayLM from R. Makes data more easily accessible
 
-
-def make_hierarchical(df, index_names=None, split_str='_'):
-    """
-
-    Parameters
-    ----------
-    df
-    index_names
-    split_str
-
-    Returns
-    -------
+    Note: This will probably never be directly instantiated because DEResults inherits from and extends upon
+    this base class
 
     """
+    def __init__(self, obj):
+        """
+
+        :param obj:
+        """
+        # Store the original object
+        self.robj = obj                 # type: robj.vectors.ListVector
+
+        # Initialize expected attributes. See R documentation on MArrayLM for more details on attributes
+        self.Amean = None               # type: np.ndarray
+        self.F = None                   # type: np.ndarray
+        self.F_p_value = None           # type: np.ndarray
+        self.assign = None              # type: np.ndarray
+        self.coefficients = None        # type: pd.DataFrame
+        self.contrasts = None           # type: pd.DataFrame
+        self.cov_coefficients = None    # type: pd.DataFrame
+        self.design = None              # type: pd.DataFrame
+        self.df_prior = None            # type: float
+        self.df_residual = None         # type: np.ndarray
+        self.df_total = None            # type: np.ndarray
+        self.lods = None                # type: pd.DataFrame
+        self.method = None              # type: str
+        self.p_value = None             # type: pd.DataFrame
+        self.proportion = None          # type: float
+        self.qr = None                  # type: dict
+        self.rank = None                # type: int
+        self.s2_post = None             # type: np.ndarray
+        self.s2_prior = None            # type: float
+        self.sigma = None               # type: np.ndarray
+        self.stdev_unscaled = None      # type: pd.DataFrame
+        self.t = None                   # type: pd.DataFrame
+        self.var_prior = None           # type: float
+
+        # Unpack the values
+        self.unpack()
+        self.contrast_list = self.contrasts.columns.values
+
+    def unpack(self):
+        """
+        Unpack the MArrayLM object (rpy2 listvector) into an object.
+        """
+        # Unpack the list vector object
+        data = rh.unpack_r_listvector(self.robj)
+
+        # Store the values into attributes
+        for k, v in data.items():
+            setattr(self, k, v)
+
+
+class DEResults(MArrayLM):
     """
-    Make a regular dataframe hierarchical by adding a MultiIndex
-    :param df: dataframe; the dataframe to made hierarchical
-    :param index_names: list; names for each of the categories of the multiindex
-    :param axis: int (0 or 1); axis along which to split the index into a multiindex. Default (0) splits along the dataframe index, while 1 splits along the dataframe columns
-    :param split_str: str; the string on which to split tuples
-    :return: dataframe; hierarchical dataframe with multiindex
+    Class intended to organize results from differential expression analysis in easier fashion
     """
+    def __init__(self, fit, name=None, fit_type=None):
+        # Call super
+        super(DEResults, self).__init__(fit)
 
-    # Split each label into hierarchy
-    try:
-        index = df.columns
-        s_index = split_index(index, split_str)
-    except ValueError:
-        df = df.T
-        index = df.columns
-        s_index = split_index(index, split_str)
-        warnings.warn('Multiindex found for rows, but not columns. Returned data frame is transposed from input')
+        self.name = name                                                                # type: str
+        self.fit_type = fit_type                                                        # type: str
+        self.continuous_kwargs = {'coef': null, "number": 10, 'genelist': null,
+                                  "adjust_method": "BH", "sort_by": "B", "resort_by": null,
+                                  "p_value": 0.05, "lfc": 0, "confint": False}          # type: dict
+        self.discrete_kwargs = {'method': 'separate', 'adjust_method': 'BH',
+                                'p_value': 0.05, 'lfc': 0}                              # type: dict
+        self.continuous = self.top_table(**self.continuous_kwargs)                      # type: pd.DataFrame
+        self.discrete = self.decide_tests(**self.discrete_kwargs)                       # type: pd.DataFrame
 
-    h_df = df.copy()
-    m_index = pd.MultiIndex.from_tuples(s_index, names=index_names)
-    h_df.columns = m_index
+    def top_table(self, use_fstat=None, p=1, n='inf', **kwargs) -> pd.DataFrame:
+        """
+        Print top_table of differential expression analysis
+        :param fit: MArrayLM; a fit object created by DEAnalysis
+        :param use_fstat: bool; select genes using F-statistic. Useful if testing significance for multiple contrasts,
+        such as a time series
+        :param p float; cutoff for significant top_table. Default is 0.05. If np.inf, then no cutoff is applied
+        :param n int or 'inf'; number of significant top_table to include in output. Default is 'inf' which includes all
+        top_table passing the threshold
+        :param kwargs: additional arguments to pass to topTable. see topTable documentation in R for more details.
+        :return:
+        """
 
-    return h_df
+        # Update kwargs with commonly used ones provided in this API
+        kwargs = dict(kwargs, p_value=p, number=n)
 
+        # Use fstat if multiple contrasts supplied
+        if use_fstat is None:
+            use_fstat = False if (isinstance(self.contrast_list, str) or
+                                  (isinstance(self.contrast_list, list) and len(self.contrast_list) == 1)) else True
 
-def str_convert(s):
-    try:
-        s = int(s)
-    except ValueError:
-        pass
-    return s
+        if use_fstat:
+            # Modify parameters for use with topTableF
+            kwargs['sort_by'] = 'F'
+            if kwargs['coef'] != null:
+                warnings.warn('Cannot specify value for argument "coef" when using F statistic for topTableF. '
+                              'The value will be dropped')
+            # Drop values that won't be used by topTableF
+            for k in ['coef', 'resort_by', 'confint']:
+                del kwargs[k]
+            table = limma.topTableF(self.robj, **kwargs)
+        else:
+            table = limma.topTable(self.robj, **kwargs)
 
+        # Add use_fstat
+        kwargs = dict(kwargs, use_fstat=use_fstat)
+        self.continuous_kwargs = kwargs
 
-def split_index(index, split_str):
-    """
-    Split a list of strings into a list of tuples.
-    :param index: list-like; List of strings to be split
-    :param split_str: str; substring by which to split each string
-    :return:
-    """
-    s_index = [tuple(map(str_convert, ind.split(split_str))) for ind in index if split_str in ind]
-    if len(s_index) != len(index):
-        raise ValueError('Index not split properly using supplied string')
-    return s_index
+    def decide_tests(self, m='global', **kwargs) -> pd.DataFrame:
+        """
+        Determine if each gene is significantly differentially expressed based on criteria. Returns discrete values.
+
+        :param m: str; Method used for multiple hypothesis testing. See R documentation for more details.
+        :param kwargs: Additional keyword arguments available in R.
+        :return: DataFrame; 1 for overexpressed, -1 for underexpressed, 0 if not significantly different.
+        """
+        # Update kwargs with commonly used ones provided in this API
+        kwargs = dict(kwargs, method=m)
+
+        # Run decide tests
+        decide = limma.decideTests(self.robj, **kwargs)
+
+        self.discrete_kwargs = kwargs
+
+        # Convert to dataframe
+        df = rh.rvect_to_py(decide).astype(int)
+        return df
 
 
 class DEAnalysis(object):
@@ -87,31 +161,51 @@ class DEAnalysis(object):
     An object that does differential expression analysis with time course data
     """
 
-    def __init__(self, df=None, index_names=None, split_str='_', reference_labels=None):
-        self.data = None
-        self.sample_labels = None
-        self.contrasts = None
-        self.experiment_summary = None
-        self.design = None
-        self.data_matrix = None
-        self.contrast_robj = None
-        self.l_fit = None
-        self.de_fit = None
-        self.results = None
+    def __init__(self, df=None, index_names=None, split_str='_', time='time', condition='condition',
+                 replicate='replicate', reference_labels=None):
+        """
+
+        :param df:
+        :param index_names:
+        :param split_str:
+        :param time:
+        :param condition:
+        :param replicate:
+        :param reference_labels:
+        """
+
+        self.data = None                    # type: pd.DataFrame
+        self.labels = None
+        self.times = None                   # type: list
+        self.conditions = None              # type: list
+        self.replicates = None              # type: list
+        self.default_contrasts = None
+        self.timeseries = False             # type: bool
+        self.samples = None                 # type: list
+        self.experiment_summary = None      # type: pd.DataFrame
+        self.design = None                  # type: robjects.vectors.Matrix
+        self.data_matrix = None             # type: robjects.vectors.Matrix
+        self.contrast_robj = None           # type: robjects.vectors.Matrix
+        self.fit = None                     # type: dict
+        self.results = None                 # type: Dict[str, DEResults]
+        self.decide = None                  # type: pd.DataFrame
 
         if df is not None:
             self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels)
-
-        # Import requisite R packages
-        self.limma = importr('limma')
-        self.stats = importr('stats')
+            if time is not None:
+                self.times = sorted(map(int_or_float, list(set(self.experiment_summary[time]))))
+                if len(self.times) > 1:
+                    self.timeseries = True
+            self.conditions = sorted(list(set(self.experiment_summary[condition])))
+            self.default_contrasts = self.possible_contrasts()
+            self.replicates = sorted(list(set(self.experiment_summary[replicate])))
 
     def _set_data(self, df, index_names=None, split_str='_', reference_labels=None):
         # Check for a multiindex or try making one
-        multiindex = is_multiindex(df)
+        multiindex = mi.is_multiindex(df)
         h_df = None
         if sum(multiindex) == 0:
-            h_df = make_hierarchical(df, index_names=index_names, split_str=split_str)
+            h_df = mi.make_hierarchical(df, index_names=index_names, split_str=split_str)
         else:
             if multiindex[1]:
                 h_df = df.copy()
@@ -120,12 +214,17 @@ class DEAnalysis(object):
                 warnings.warn('DataFrame transposed so multiindex is along columns.')
 
             # Double check multiindex
-            multiindex = is_multiindex(h_df)
+            multiindex = mi.is_multiindex(h_df)
             if sum(multiindex) == 0:
                 raise ValueError('No valid multiindex was found, and once could not be created')
 
+        h_df.sort_index(axis=1, inplace=True)
         self.data = h_df
+        # Sort multiindex
+
         self.experiment_summary = self.get_experiment_summary(reference_labels=reference_labels)
+        self.design = self._make_model_matrix()
+        self.data_matrix = self._make_data_matrix()
 
     def get_experiment_summary(self, reference_labels=None):
         """
@@ -137,13 +236,100 @@ class DEAnalysis(object):
         for ii, name in enumerate(index.names):
             summary_df[name] = index.levels[ii].values[index.labels[ii]].astype(str)
         if reference_labels is not None:
-            summary_df['sample_id'], self.sample_labels = self.make_sample_ids(summary_df,
-                                                                               reference_labels=reference_labels)
+            summary_df['sample_id'], self.labels, self.samples = self.make_sample_ids(summary_df,
+                                                                                      reference_labels=reference_labels)
         else:
             warnings.warn('Sample IDs and labels not set because no reference labels supplied. R data matrix and '
                           'contrasts cannot be created without sample IDs. Setting sample labels to integers')
-            self.sample_labels = list(map(lambda x: 'x%i' % x, range(len(summary_df))))
+            self.labels = list(map(lambda x: 'x%i' % x, range(len(summary_df))))
         return summary_df
+
+    @staticmethod
+    def _contrast(v1, v2, fit_type, join_str='-'):
+        contrast = {'contrasts': list(map(join_str.join, zip(v1, v2))),
+                    'fit_type': fit_type}
+        return contrast
+
+    def possible_contrasts(self, p_idx=0):
+        """
+        Make a list of expected contrasts based on times and conditions
+        :param p_idx: int; the index of the time sample when the perturbation was applied
+        :return:
+        """
+
+        '''
+        Contrast classes - DE, TS, AR, TS-DE, DE-TS, AR-DE, DE-AR
+        DE: Differential Expression
+        TS: Time Series
+        AR: Autoregression
+        '''
+
+        if self.timeseries:
+            # Labels to append to keys to signify contrast type
+            ts_str = '_ts'
+            ar_str = '_ar'
+
+            # List of condition pairs
+            condition_combos = list(itertools.combinations_with_replacement(self.conditions, 2))
+            contrasts = {}
+
+            # Build basic contrasts
+            for c in condition_combos:
+                # Time series
+                if c[0] == c[1]:
+                    x = c[0]
+                    samples = grepl(x, self.samples)
+                    contrasts[str(x) + ts_str] = self._contrast(samples[1:], samples[:-1], 'TS')
+
+                    # Autoregression
+                    ar_samples = [samples[p_idx]] * (len(samples) - 1)
+                    contrasts[str(x) + ar_str] = self._contrast(samples[1:], ar_samples, 'AR')
+
+                # Static
+                else:
+                    contrasts['-'.join(c)] = self._contrast(grepl(c[0], self.samples), grepl(c[1], self.samples), 'DE')
+
+            # Make complex contrasts
+            # TS-DE labels
+
+            diffs = list(itertools.permutations(grepl(ts_str, contrasts.keys()), 2))
+            # Add TS-AR labels
+            diffs += list(itertools.permutations(grepl(ar_str, contrasts.keys()), 2))
+
+            # Labels used for DE-TS and DE-AR
+            de_diffs = grepl('-', contrasts.keys())
+
+            for diff in diffs:
+                ts1 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[0]]['contrasts']))
+                ts2 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[1]]['contrasts']))
+                fit_type = 'TS-DE' if ts_str in diff[0] else 'AR-DE'
+                contrasts['-'.join(diff)] = self._contrast(ts1, ts2, fit_type=fit_type)
+
+            # Now add DE-TS and DE-AR
+
+            for de in de_diffs:
+                # DE-TS
+                base_de = list(map(lambda contrast: '(%s)' % contrast, contrasts[de]['contrasts']))
+                contrasts["(%s)_ts" % de] = self._contrast(base_de[1:], base_de[:-1], fit_type='DE-TS')
+
+                # DE-AR
+                ar_de = [base_de[0]] * (len(base_de) - 1)
+                contrasts["(%s)_ar" % de] = self._contrast(base_de[1:], ar_de, fit_type='DE-AR')
+            expected_contrasts = contrasts
+        else:
+            expected_contrasts = list(map('-'.join, itertools.permutations(self.conditions, 2)))
+        return expected_contrasts
+
+    def suggest_contrasts(self):
+        print('Timeseries Data:', self.timeseries)
+        print('ts = Timeseries contrasts, ar = Autoregressive contrasts \n')
+        if isinstance(self.default_contrasts, dict):
+            sorted_keys = sorted(self.default_contrasts.keys())
+            for k in sorted_keys:
+                print(k +":", self.default_contrasts[k])
+        elif isinstance(self.default_contrasts, list):
+            for c in self.default_contrasts:
+                print(c)
 
     @staticmethod
     def make_sample_ids(summary, reference_labels):
@@ -159,9 +345,33 @@ class DEAnalysis(object):
                              % ', '.join(ref_not_in_summary))
         # Make unique combinations from the reference labels
         combos = ['_'.join(combo) for combo in summary.loc[:, reference_labels].values.tolist()]
-        combo_set = sorted(list(set(combos)))
+        combo_set = natsorted(list(set(combos)))
         ids = [combo_set.index(combo) for combo in combos]
-        return ids, combos
+        return ids, combos, combo_set
+
+    def standardize(self):
+        """
+        Normalize the data to the 0 timepoint.
+
+        NOTE: This should have expanded functionality in the future
+        :return:
+        """
+        raw = self.data.copy()
+        for condition in self.conditions:
+            # Standardize genes at each timepoint
+            for tt in self.times:
+                data = raw.loc(axis=1)[condition, :, tt, :]
+                standard = np.nan_to_num(zscore(data, axis=0, ddof=1))
+                raw.loc(axis=1)[condition, :, tt, :] = standard
+
+            # Standardize genes across time
+            for rep in self.replicates:
+                data = raw.loc(axis=1)[condition, :, :, rep]
+
+                if data.shape[1] > 2:
+                    raw.loc(axis=1)[condition, :, :, rep] = zscore(data, axis=1, ddof=1)
+
+        self.data = raw
 
     def print_experiment_summary(self, verbose=False):
         """
@@ -187,15 +397,15 @@ class DEAnalysis(object):
         :return:    R-matrix
         """
         # Make an robject for the model matrix
-        r_sample_labels = robjects.FactorVector(self.sample_labels)
+        r_sample_labels = robjects.FactorVector(self.labels)
 
         # Create R formula object, and change the environment variable
         fmla = robjects.Formula(formula)
         fmla.environment['x'] = r_sample_labels
 
-        # Make the design matrix. self.stats is a bound R package
-        design = self.stats.model_matrix(fmla)
-        design.colnames = robjects.StrVector(sorted(list(set(self.sample_labels))))
+        # Make the design matrix. stats is a bound R package
+        design = stats.model_matrix(fmla)
+        design.colnames = robjects.StrVector(sorted(list(set(self.labels))))
         return design
 
     def _make_data_matrix(self):
@@ -208,6 +418,7 @@ class DEAnalysis(object):
 
         # Log transform expression and correct values if needed
         data = np.log2(self.data.values)
+        # data = self.data.values
         if np.sum(np.isnan(data)) > 0:
             warnings.warn("NaNs detected during log expression transformation. Setting to NaN values to zero.")
             data = np.nan_to_num(data)
@@ -215,93 +426,117 @@ class DEAnalysis(object):
         # Make r matrix object
         nr, nc = data.shape
         r_matrix = robjects.r.matrix(data, nrow=nr, ncol=nc)
-        r_matrix.colnames = robjects.StrVector(self.sample_labels)
+        r_matrix.colnames = robjects.StrVector(self.labels)
         r_matrix.rownames = robjects.StrVector(genes)
         return r_matrix
 
-    def _make_contrasts(self, contrasts, levels):
+    @staticmethod
+    def _make_contrasts(contrasts, levels):
         """
         Make an R contrasts object that is used by limma
+
         :param contrasts: dict, list, str; The contrast(s) to use in differential expression.  A dictionary will be
             passed as kwargs, which is analagous to the ellipsis "..." in R.
         :return:
         """
         # If the contrasts are a dictionary they need to be unpacked as kwargs
         if isinstance(contrasts, dict):
-            contrast_obj = self.limma.makeContrasts(**contrasts,
-                                                    levels=levels)
+            contrast_obj = limma.makeContrasts(**contrasts, levels=levels)
         # A string or list of strings can be passed directly
         else:
-            contrast_obj = self.limma.makeContrasts(contrasts=contrasts,
-                                                    levels=levels)
+            contrast_obj = limma.makeContrasts(contrasts=contrasts, levels=levels)
         return contrast_obj
 
-    def _ebayes(self, fit_obj, contrast_obj):
+    @staticmethod
+    def _ebayes(fit_obj, contrast_obj):
         """
         Calculate differential expression using empirical bayes
-        :param fit_obj: MArrayLM; linear model fit from limma in R. Typically from R function limma.lmFit()
-        :param contrast_obj: R-matrix; numeric matrix with rows corresponding to coefficients in fit and columns
+        :param fit_obj: MArrayLM; linear model fit_contrasts from limma in R. Typically from R function limma.lmFit()
+        :param contrast_obj: R-matrix; numeric matrix with rows corresponding to coefficients in fit_contrasts and columns
             containing contrasts.
         :return:
         """
-        contrast_fit = self.limma.contrasts_fit(fit=fit_obj, contrasts=contrast_obj)
-        bayes_fit = self.limma.eBayes(contrast_fit)
+        contrast_fit = limma.contrasts_fit(fit=fit_obj, contrasts=contrast_obj)
+        bayes_fit = limma.eBayes(contrast_fit)
         return bayes_fit
 
-    def get_results(self, use_fstat=None, p_value=0.05, n='inf', **kwargs):
+    def _fit_contrast(self, contrast):
         """
-        Print get_results of differential expression analysis
-        :param use_fstat: bool; select genes using F-statistic. Useful if testing significance for multiple contrasts,
-        such as a time series
-        :param p_value float; cutoff for significant get_results. Default is 0.05. If np.inf, then no cutoff is applied
-        :param n int or 'inf'; number of significant get_results to include in output. Default is 'inf' which includes all
-        get_results passing the threshold
-        :param kwargs: additional arguments to pass to topTable. see topTable documentation in R for more details.
+        Fit the differential expression model using the supplied contrasts.
+
+        :param contrast:  str, list, or dict; contrasts to test for differential expression. Strings and elements of
+        lists must be in the format "X-Y". Dictionary elements must be in {contrast_name:"(X1-X0)-(Y1-Y0)").
+        :return:
+        """
+        # Setup contrast matrix
+        contrast_robj = self._make_contrasts(contrasts=contrast, levels=self.design)
+
+        # Perform a linear fit_contrasts, then empirical bayes fit_contrasts
+        linear_fit = limma.lmFit(self.data_matrix, self.design)
+        fit = self._ebayes(linear_fit, contrast_robj)
+
+        return fit
+
+    def _fit_dict(self, contrast_dict: dict) -> Dict[str, DEResults]:
+        """
+        Make the fits into a dictionary. This is wrapped into a function for type hinting
+        :param self:
+        :param names:
+        :param contrasts:
         :return:
         """
 
-        # Update kwargs with commonly used ones provided in this API
-        kwargs = dict(kwargs, p_value=p_value, n=n)
+        # Make fit dictionary
+        fits = {name: DEResults(self._fit_contrast(contrast['contrasts']), name=name, fit_type=contrast['fit_type'])
+                for name, contrast in contrast_dict.items()}
+        return fits
 
-        # Use fstat if multiple contrasts supplied
-        if use_fstat is None:
-            use_fstat = False if (isinstance(self.contrasts, str) or
-                                  (isinstance(self.contrasts, list) and len(self.contrasts) > 1)) else True
-
-        if use_fstat:
-            if 'coef' in kwargs.keys():
-                raise ValueError('Cannot specify value for argument "coef" when using F statistic for topTableF')
-            table = self.limma.topTableF(self.de_fit, **kwargs)
-        else:
-            table = self.limma.topTable(self.de_fit, **kwargs)
-
-        with localconverter(default_converter + pandas2ri.converter) as cv:
-            df = pandas2ri.ri2py(table)
-        return df
-
-    def fit(self, contrasts):
+    def fit_contrasts(self, contrasts=None, names=None, fit_types=None, fit_defaults=True):
         """
-        Fit the differential expression model using the supplied contrasts
+        Wrapper to fit the differential expression model using the supplied contrasts.
+
         :param contrasts: str, list, or dict; contrasts to test for differential expression. Strings and elements of
-        lists must be in the format "X-Y". Dictionary elements must be in {contrast_name:"(X1-X0)-(Y1-Y0)")
+        lists must be in the format "X-Y". Dictionary elements must be in {contrast_name:"(X1-X0)-(Y1-Y0)"). To conduct
+        multiple fits, a list of mixed contrast types can be supplied. Each list item will be treated as an independent
+        fit.
+        :param names: str or list; names for each fit
         :return:
         """
-        # Save the user supplied contrasts
-        self.contrasts = contrasts
+
         if self.data is None:
-            raise ValueError('Please add data using set_data() before attempting to fit.')
+            raise ValueError('Please add data using set_data() before attempting to fit_contrasts.')
 
-        # Setup design, data, and contrast matrices
-        self.design = self._make_model_matrix()
-        self.data_matrix = self._make_data_matrix()
-        self.contrast_robj = self._make_contrasts(contrasts=self.contrasts, levels=self.design)
+        # Initialize full contrast dictionary
+        all_contrasts = self.default_contrasts if fit_defaults else {}
 
-        # Perform a linear fit, then empirical bayes fit
-        self.l_fit = self.limma.lmFit(self.data_matrix, self.design)
-        self.de_fit = self._ebayes(self.l_fit, self.contrast_robj)
+        if contrasts is not None:
+            # Determine contrast type
+            n_fits = 1
+            if isinstance(contrasts, list):
+                n_strings = sum([isinstance(l, str) for l in contrasts])
 
-        # Set results to include all test values
-        self.results = self.get_results(p_value=np.inf)
+                # If all items in the list aren't strings, then it is likely multiple contrasts for independent fits
+                if n_strings != len(contrasts):
+                    n_fits = len(contrasts)
+
+            # Make a list of names
+            if names is None:
+                names = [str(n) for n in range(n_fits)]
+            elif isinstance(names, str):
+                names = [names]
+
+            # Make nested contrast dictionary to match format expected of default contrasts
+            user_contrasts = {name: {'contrasts': contrast, 'fit_type': None} for name, contrast in zip(names, contrasts)}
+
+            # Check if there are clashes and warn of override
+            key_clash = [key for key in user_contrasts.keys() if key in all_contrasts.keys()]
+            if key_clash:
+                warning = ("\nThe user contrasts: '%s' are in the default contrasts "
+                           "and will be overridden by the user values." % (','.join(key_clash)))
+                warnings.warn(warning)
+            all_contrasts = dict(all_contrasts, **user_contrasts)
+
+        self.results = self._fit_dict(all_contrasts)
 
     def to_pickle(self, path):
         # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame

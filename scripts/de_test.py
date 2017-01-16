@@ -1,5 +1,7 @@
-import sys
+import sys, collections
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 from pydiffexp import DEAnalysis
 
 # Variables
@@ -10,10 +12,4 @@ hierarchy = ['condition', 'well', 'time', 'replicate']
 raw_data[raw_data <= 0] = 1
 dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition', 'time'])
 
-print(dea.data)
-# Types of contrasts
-c_dict = {'Diff0': "(KO_15-KO_0)-(WT_15-WT_0)", 'Diff15': "(KO_60-KO_15)-(WT_60-WT_15)",
-          'Diff60': "(KO_120-KO_60)-(WT_120-WT_60)", 'Diff120': "(KO_240-KO_120)-(WT_240-WT_120)"}
-c_list = ["KO_15-KO_0", "KO_60-KO_15", "KO_120-KO_60", "KO_240-KO_120"]
-c_string = "KO_0-WT_0"
-dea.fit(c_dict)
+dea.fit_contrasts()

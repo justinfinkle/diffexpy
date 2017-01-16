@@ -1,2 +1,4 @@
-from .diffexp import DEAnalysis
+from .legacy import *
 from .diffexp import *
+from .diffexp import DEAnalysis
+from .plot import *
