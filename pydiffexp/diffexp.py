@@ -126,7 +126,8 @@ class DEResults(MArrayLM):
                               'The value will be dropped')
             # Drop values that won't be used by topTableF
             for k in ['coef', 'resort_by', 'confint']:
-                del kwargs[k]
+                if k in kwargs.keys():
+                    del kwargs[k]
             table = limma.topTableF(self.robj, **kwargs)
         else:
             table = limma.topTable(self.robj, **kwargs)
@@ -134,6 +135,11 @@ class DEResults(MArrayLM):
         # Add use_fstat
         kwargs = dict(kwargs, use_fstat=use_fstat)
         self.continuous_kwargs = kwargs
+
+        # Convert table to pandas df
+        table = rh.rdf_to_pydf(table)
+
+        return table
 
     def decide_tests(self, m='global', **kwargs) -> pd.DataFrame:
         """

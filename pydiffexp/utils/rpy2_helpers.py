@@ -14,6 +14,18 @@ def unpack_r_listvector(l_vector: robj.vectors.ListVector) -> dict:
     return d
 
 
+def rdf_to_pydf(x):
+    """Convert an R dataframe to a python dataframe"""
+    '''
+    The converter is activated and then deactivated. There have been some reports of inconsistencies if the
+    converter is activated during import
+    '''
+    pandas2ri.activate()
+    df = pandas2ri.ri2py(x)
+    pandas2ri.deactivate()
+    return df
+
+
 def rvect_to_py(vector):
     """
     Convert an R vector to its appropriate python equivalent
@@ -24,13 +36,7 @@ def rvect_to_py(vector):
 
     # DataFrame
     if isinstance(vector, robj.vectors.DataFrame):
-        '''
-        The converter is activated and then deactivated. There have been some reports of inconsistencies if the
-        converter is activated during import
-        '''
-        pandas2ri.activate()
-        x = pandas2ri.ri2py(vector)
-        pandas2ri.deactivate()
+        x = rdf_to_pydf(vector)
 
     # Matrix
     elif isinstance(vector, robj.vectors.Matrix):
