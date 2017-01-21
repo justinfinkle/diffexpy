@@ -136,10 +136,16 @@ class DEResults(MArrayLM):
         kwargs = dict(kwargs, use_fstat=use_fstat)
         self.continuous_kwargs = kwargs
 
-        # Convert table to pandas df
-        table = rh.rdf_to_pydf(table)
+        df = rh.rvect_to_py(table)
 
-        return table
+        # Rename the column and add the negative log10 values
+        df.rename(columns={'adj.P.Val': 'adj_pval', 'P.Value': 'pval'}, inplace=True)  # Remove expected periods
+        df_cols = df.columns.values.tolist()
+        df_cols[:len(self.contrast_list)] = self.contrast_list
+        df.columns = df_cols
+        df['-log10p'] = -np.log10(df['adj_pval'])
+
+        return df
 
     def decide_tests(self, m='global', **kwargs) -> pd.DataFrame:
         """
