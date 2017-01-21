@@ -118,12 +118,19 @@ class DEResults(MArrayLM):
             use_fstat = False if (isinstance(self.contrast_list, str) or
                                   (isinstance(self.contrast_list, list) and len(self.contrast_list) == 1)) else True
 
+        if 'coef' in kwargs.keys() and kwargs['coef'] != null:
+            single_contrast = True
+            if use_fstat:
+                warnings.warn('Cannot specify use_fstat=True when a specifiying a value for "coef"'
+                              'use_fstat will be set to False')
+                use_fstat = False
+        else:
+            single_contrast = False
+
         if use_fstat:
             # Modify parameters for use with topTableF
             kwargs['sort_by'] = 'F'
-            if kwargs['coef'] != null:
-                warnings.warn('Cannot specify value for argument "coef" when using F statistic for topTableF. '
-                              'The value will be dropped')
+
             # Drop values that won't be used by topTableF
             for k in ['coef', 'resort_by', 'confint']:
                 if k in kwargs.keys():
@@ -140,10 +147,12 @@ class DEResults(MArrayLM):
 
         # Rename the column and add the negative log10 values
         df.rename(columns={'adj.P.Val': 'adj_pval', 'P.Value': 'pval'}, inplace=True)  # Remove expected periods
-        df_cols = df.columns.values.tolist()
-        df_cols[:len(self.contrast_list)] = self.contrast_list
-        df.columns = df_cols
         df['-log10p'] = -np.log10(df['adj_pval'])
+
+        if not single_contrast:
+            df_cols = df.columns.values.tolist()
+            df_cols[:len(self.contrast_list)] = self.contrast_list
+            df.columns = df_cols
 
         return df
 
