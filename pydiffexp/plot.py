@@ -96,7 +96,7 @@ class DiffExpPlot(object):
         ax.tick_params(axis='both', which='major')
         ax.set_xlabel(r'$log_2(\frac{KO}{WT})$')
         ax.set_ylabel(r'$-log_{10}$(corrected p-value)')
-        plt.show()
+        return ax
 
     def add_ts(self, ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None, ci=0.83):
         gene = data.name
@@ -127,7 +127,6 @@ class DiffExpPlot(object):
     def tsplot(self, df, supergroup='condition', subgroup='time'):
         gene = df.name
         supers = sorted(list(set(df.index.get_level_values(supergroup))))
-        print(supers)
         fig, ax = plt.subplots()
         ax.set_prop_cycle(cycler('color', _colors))
         for sup in supers:
@@ -139,7 +138,7 @@ class DiffExpPlot(object):
         ax.set_xlabel(subgroup.title())
         ax.set_ylabel('Expression')
         ax.set_title(gene)
-        plt.tight_layout()
+        return ax
 
     def make_path_dict(self, condition, max_sw, min_sw=0.0, path='all', dc_df=None, genes=None, norm=None):
         """ Creates a dictionary mapping paths to normalized gene counts
@@ -199,7 +198,6 @@ class DiffExpPlot(object):
                     pass
         return flow_dict, array_min, array_max, norm
 
-
     def plot_nodes(self, ax, flow_dict, node_width, x_coords):
         """ Plots nodes of flow dictionary
 
@@ -233,7 +231,6 @@ class DiffExpPlot(object):
 
         return nodes
 
-
     def calc_height(self, flow_dict, seg_dict, x, y):
         """ Gets node heights for given step and level
 
@@ -266,7 +263,6 @@ class DiffExpPlot(object):
 
         return heights
 
-
     def calc_offset(self, flow_dict, nodes, x, y, height):
         """ Gets y axis adjustment to center rectangles
 
@@ -295,7 +291,6 @@ class DiffExpPlot(object):
         else:
             return 0
 
-
     def make_node_points(self, x, y, height, width):
         """ Calculates vertices of rectangle
 
@@ -316,7 +311,6 @@ class DiffExpPlot(object):
 
         # Set of four points, starting with lower left corner.
         return np.array([[x - w, y - h], [x + w, y - h], [x + w, y + h], [x - w, y + h]])
-
 
     def plot_polys(self, ax, flow_dict, nodes, flow_color, flow_alpha, dir):
         """ Plots the path polygons
@@ -395,7 +389,6 @@ class DiffExpPlot(object):
 
         return polys
 
-
     def plot_subpath(self, ax, path, condition, norm, min_sw):
         poly_dict = {0: self.horizontal_patches, -1: self.down_patches, 1: self.up_patches}
         point_dict = {0: (0, 1, 2, 3), -1: (3, 0, 1, 2), 1: (2, 1, 0, 3)}  # Dictionary to match array indices
@@ -437,7 +430,6 @@ class DiffExpPlot(object):
             # todo: def get_background_patch()
             # todo: def make_future_path()
 
-
     def make_curve_path(self, point_set):
         """ Creates a curved path given endpoints
 
@@ -464,7 +456,6 @@ class DiffExpPlot(object):
                  Path.CLOSEPOLY]
 
         return Path(verts, codes)
-
 
     def plot_flows(self, ax, sets, colors, alphas, paths, max_sw=1, min_sw=0.01, node_width=None, x_coords=None,
                    uniform=False, path_df=None, genes=None, norm=None):

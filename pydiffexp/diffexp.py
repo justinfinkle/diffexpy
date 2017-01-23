@@ -121,7 +121,7 @@ class DEResults(MArrayLM):
         if 'coef' in kwargs.keys() and kwargs['coef'] != null:
             single_contrast = True
             if use_fstat:
-                warnings.warn('Cannot specify use_fstat=True when a specifiying a value for "coef"'
+                warnings.warn('Cannot specify use_fstat=True when a specifiying a value for "coef"\n'
                               'use_fstat will be set to False')
                 use_fstat = False
         else:
