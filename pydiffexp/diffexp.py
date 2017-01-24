@@ -1,5 +1,6 @@
 import os, sys, warnings, itertools
 from typing import Dict
+from collections import Counter
 import numpy as np
 import pandas as pd
 import rpy2.robjects as robjects
@@ -10,6 +11,7 @@ from pydiffexp.utils.utils import int_or_float, grepl
 import pydiffexp.utils.multiindex_helpers as mi
 import pydiffexp.utils.rpy2_helpers as rh
 from natsort import natsorted
+import matplotlib.pyplot as plt
 
 # Activate conversion
 rpy2.robjects.numpy2ri.activate()
@@ -96,6 +98,45 @@ class DEResults(MArrayLM):
                                 'p_value': 0.05, 'lfc': 0}                              # type: dict
         self.continuous = self.top_table(**self.continuous_kwargs)                      # type: pd.DataFrame
         self.discrete = self.decide_tests(**self.discrete_kwargs)                       # type: pd.DataFrame
+        self.discrete_clusters = self.cluster_discrete(self.discrete)                   # type: pd.DataFrame
+        self.cluster_count = self.count_clusters(self.discrete_clusters)                # type: pd.DataFrame
+
+    def count_clusters(self, df, column='Cluster') -> pd.DataFrame:
+        """
+        Count the clusters in each category
+        :param df:
+        :param column:
+        :return:
+        """
+        n_timepoints = self.contrasts.shape[1]
+        zeros = str(tuple([0] * n_timepoints))
+        counts = Counter(df[column].tolist())
+        del counts[zeros]
+
+        cluster_count = pd.DataFrame.from_dict(counts, orient='index')
+        cluster_count.columns = ['Count']
+
+        # Calculate difference from expectation of evenly distributed bins
+        expected_clusters = 3 ** n_timepoints
+        num_clusters = len(counts)
+        n_genes = sum(counts.values())
+        expected_per_cluster = round(n_genes/expected_clusters)
+
+        cluster_count['Diff from Expectation'] = np.abs(cluster_count['Count']-expected_per_cluster)
+
+        return cluster_count
+
+    @staticmethod
+    def cluster_discrete(df) -> pd.DataFrame:
+        """
+        Cluster trajectories into tuples that can be easily counted
+        :param df: DataFrame; expected to come from decide_tests
+        :return:
+        """
+        clusters = [str(tuple(gene)) for gene in df.values]
+        cluster_df = pd.DataFrame(clusters, index=df.index, columns=['Cluster'])
+
+        return cluster_df
 
     def top_table(self, use_fstat=None, p=1, n='inf', **kwargs) -> pd.DataFrame:
         """
