@@ -482,7 +482,7 @@ class DEAnalysis(object):
         data = np.log2(self.data.values)
         # data = self.data.values
         if np.sum(np.isnan(data)) > 0:
-            warnings.warn("NaNs detected during log expression transformation. Setting to NaN values to zero.")
+            warnings.warn("NaNs detected during log expression transformation. Setting NaN values to zero.")
             data = np.nan_to_num(data)
 
         # Make r matrix object

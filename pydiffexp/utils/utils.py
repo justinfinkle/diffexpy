@@ -1,4 +1,5 @@
 from functools import singledispatch
+import pandas as pd
 
 @singledispatch
 def grepl(substr, search_list):
@@ -48,3 +49,17 @@ def filter_value(x, value, axis=1, criteria='all'):
         x = x[~(x == value).any(axis=axis)]
 
     return x
+
+
+def column_unique(x):
+    """
+    Count the number of unique values in each column
+    :param df:
+    :return:
+    """
+    df = pd.DataFrame()
+    for col in x:
+        data = x[col]
+        df[data.name] = data.value_counts()
+    return df
+
