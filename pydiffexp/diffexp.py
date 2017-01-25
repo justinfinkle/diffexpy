@@ -352,23 +352,11 @@ class DEAnalysis(object):
                     contrasts['-'.join(c)] = self._contrast(grepl(c[0], self.samples), grepl(c[1], self.samples), 'DE')
 
             # Make complex contrasts
-            # TS-DE labels
-
-            diffs = list(itertools.permutations(grepl(ts_str, contrasts.keys()), 2))
-            # Add TS-AR labels
-            diffs += list(itertools.permutations(grepl(ar_str, contrasts.keys()), 2))
 
             # Labels used for DE-TS and DE-AR
             de_diffs = grepl('-', contrasts.keys())
 
-            for diff in diffs:
-                ts1 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[0]]['contrasts']))
-                ts2 = list(map(lambda contrast: '(%s)' % contrast, contrasts[diff[1]]['contrasts']))
-                fit_type = 'TS-DE' if ts_str in diff[0] else 'AR-DE'
-                contrasts['-'.join(diff)] = self._contrast(ts1, ts2, fit_type=fit_type)
-
             # Now add DE-TS and DE-AR
-
             for de in de_diffs:
                 # DE-TS
                 base_de = list(map(lambda contrast: '(%s)' % contrast, contrasts[de]['contrasts']))
