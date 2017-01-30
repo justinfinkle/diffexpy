@@ -35,11 +35,12 @@ print('\n', len(de_ko_global[de]), 'DE when considering global effects')
 # Genes that start off differentially expressed but no longer are
 converge = der.discrete[(de) & (der.discrete==0).any(axis=1)]
 print(der.count_clusters(der.cluster_discrete(converge)).sort_index())
-print(der.cluster_discrete(converge)[der.cluster_discrete(converge)['Cluster'] == '(-1, -1, 0, 0, 0)'])
+genes = der.cluster_discrete(converge)[der.cluster_discrete(converge)['Cluster'] == '(1, 1, 1, 1, 0)']
+print(der.continuous.loc[genes.index].sort_values('adj_pval'))
 
 dep = DiffExpPlot(dea)
 
-x = dea.data.loc['TIAM2']
+x = dea.data.loc['STEAP1']
 dep.tsplot(x)
 plt.show()
 
