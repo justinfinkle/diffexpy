@@ -250,6 +250,7 @@ class DEAnalysis(object):
         self.contrast_robj = None           # type: robjects.vectors.Matrix
         self.fit = None                     # type: dict
         self.results = None                 # type: Dict[str, DEResults]
+        self.contrast_dict = {}             # type: dict
         self.decide = None                  # type: pd.DataFrame
 
         if df is not None:
@@ -587,6 +588,29 @@ class DEAnalysis(object):
             all_contrasts = dict(all_contrasts, **user_contrasts)
 
         self.results = self._fit_dict(all_contrasts)
+
+        # Add/Update Results dictionary
+        self.contrast_dict = self.match_contrasts()
+
+    def match_contrasts(self) -> dict:
+        """
+        Make a dictionary of {contrast: [DERs]} for easy referencing.
+
+        :return: dict; format is {contrast: [DERs]}. Most values should be lists of length 1. Lists longer than 1
+        indicate that the same contrast is present in multiple DERs. The values should be equivalent between DERs,
+        however adjusted p-values may change slightly due to varied multiple hypothesis correction.
+        """
+
+        contrast_dict = {}
+        for key, der in self.results.items():
+            for c in der.contrast_list:
+                if c in contrast_dict:
+                    contrast_dict[c].append(key)
+                else:
+                    contrast_dict[c] = [key]
+        return contrast_dict
+
+    # def filter_genes(self, ):
 
     def to_pickle(self, path):
         # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame
