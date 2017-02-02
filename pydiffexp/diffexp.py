@@ -100,6 +100,22 @@ class DEResults(MArrayLM):
         self.discrete = self.decide_tests(**self.discrete_kwargs)                       # type: pd.DataFrame
         self.discrete_clusters = self.cluster_discrete(self.discrete)                   # type: pd.DataFrame
         self.cluster_count = self.count_clusters(self.discrete_clusters)                # type: pd.DataFrame
+        self.all_results = self.aggregate_results()                                     # type: pd.DataFrame
+
+    def aggregate_results(self):
+        """
+        Make a hierarchical dataframe to include all results
+        :return:
+        """
+
+        # Make the multiindex
+        discrete = pd.concat([self.discrete_clusters, self.discrete], axis=1)           # type: pd.DataFrame
+        idx_array = [['discrete']*discrete.shape[1]+['continuous']*self.continuous.shape[1],
+                     discrete.columns.values.tolist()+self.continuous.columns.values.tolist()]
+        idx = pd.MultiIndex.from_arrays(idx_array, names=['dtype', 'label'])
+        hierarchical = pd.concat([discrete, self.continuous], axis=1)
+        hierarchical.columns = idx
+        return hierarchical
 
     def count_clusters(self, df, column='Cluster') -> pd.DataFrame:
         """
@@ -252,6 +268,7 @@ class DEAnalysis(object):
         self.results = None                 # type: Dict[str, DEResults]
         self.contrast_dict = {}             # type: dict
         self.decide = None                  # type: pd.DataFrame
+        self.db = None                      # type: pd.DataFrame
 
         if df is not None:
             self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels)
@@ -591,6 +608,7 @@ class DEAnalysis(object):
 
         # Add/Update Results dictionary
         self.contrast_dict = self.match_contrasts()
+        self.db = self.make_results_db()
 
     def match_contrasts(self) -> dict:
         """
@@ -610,7 +628,17 @@ class DEAnalysis(object):
                     contrast_dict[c] = [key]
         return contrast_dict
 
-    # def filter_genes(self, ):
+    def make_results_db(self):
+        """
+        Compile the DER hierarchical results into a large dataframe, to rule them all. This should obviously be improved
+        into a better datastructure
+        :return:
+        """
+        der_results = [der.all_results for der in self.results.values()]
+        db = pd.concat(der_results, axis=1, keys=self.results.keys(),
+                       names=['fit', 'dtype', 'label'])                         # type: pd.DataFrame
+        db.sort_index(axis=1, inplace=True, level=0)
+        return db
 
     def to_pickle(self, path):
         # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame

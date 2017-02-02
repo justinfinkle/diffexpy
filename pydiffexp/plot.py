@@ -47,7 +47,7 @@ class DiffExpPlot(object):
         max_y = np.max(sig[y_colname])
         max_x = np.ceil(np.max(np.abs(sig[x_colname])))
 
-        fig, ax = plt.subplots(figsize=(10, 10))
+        fig, ax = plt.subplots()
 
         # Split top data points if requested
         if top_n:
@@ -104,6 +104,7 @@ class DiffExpPlot(object):
         grouped_data = data.groupby(subgroup)
 
         # Get plotting statistics. Rows are: group, mean, SE, and Tstat
+        #todo: Use groupby more appropriately to get stats
         grouped_stats = np.array(
             [[g, np.mean(data[gene]), stats.sem(data[gene]), stats.t.ppf(1 - (1 - ci) / 2, df=len(data) - 1)]
              for g, data in grouped_data]).T
