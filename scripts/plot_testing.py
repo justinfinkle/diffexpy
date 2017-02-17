@@ -13,6 +13,10 @@ dea = read_dea_pickle("./sprouty_pickle.pkl")
 
 # Initialize a plotting object
 dep = DiffExpPlot(dea)
+dep.tsplot(dea.data.loc['SERPINB2'])
+plt.tight_layout()
+plt.show()
+sys.exit()
 
 # Volcano Plot
 x = dea.results['KO-WT'].top_table(coef=1, use_fstat=False)
