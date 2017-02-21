@@ -1,5 +1,6 @@
 import sys, inspect
 import pandas as pd
+import seaborn as sns; sns.set() # Don't set any parameters with seaborn
 import numpy as np
 from scipy import stats
 from collections import Counter
@@ -140,6 +141,26 @@ class DiffExpPlot(object):
         ax.set_ylabel('Expression')
         ax.set_title(gene)
         return ax
+
+    def heatmap(self):
+        der = self.dea.results['KO-WT']
+        # np.random.seed(8)
+        # idx = np.random.randint(0, len(self.dea.results['KO-WT'].top_table(p=0.05)), size=100)
+        df = der.top_table(p=0.05)
+        df = pd.concat([df, der.discrete_clusters.loc[df.index]], axis=1)
+        df.sort_values(['Cluster', 'adj_pval', 'AveExpr'], inplace=True, ascending=[False, True, False])
+        # print(df)
+        # sys.exit()
+        # df = df.loc[self.dea.results['KO-WT'].discrete_clusters.loc[df.index].sort_values('Cluster').index]
+        hm_data = df.iloc[:, :5]
+        hm_data = np.abs(der.discrete.loc[df.index].values)*hm_data
+        hm_data = hm_data[~(hm_data == 0).all(axis=1)]
+        cmap = sns.diverging_palette(30, 260, s=80, l=55, as_cmap=True)
+        g = sns.clustermap(hm_data, cmap=cmap, col_cluster=False, row_cluster=False)
+        plt.setp(g.ax_heatmap.yaxis.get_majorticklabels(), rotation=0)
+        g.ax_heatmap.yaxis.set_visible(False)
+        plt.show()
+
 
     def make_path_dict(self, condition, max_sw, min_sw=0.0, path='all', dc_df=None, genes=None, norm=None):
         """ Creates a dictionary mapping paths to normalized gene counts

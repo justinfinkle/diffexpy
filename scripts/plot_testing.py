@@ -13,9 +13,10 @@ dea = read_dea_pickle("./sprouty_pickle.pkl")
 
 # Initialize a plotting object
 dep = DiffExpPlot(dea)
-dep.tsplot(dea.data.loc['SERPINB2'])
-plt.tight_layout()
-plt.show()
+
+dep.heatmap()
+
+
 sys.exit()
 
 # Volcano Plot
