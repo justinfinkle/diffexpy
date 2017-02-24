@@ -417,6 +417,20 @@ class DEAnalysis(object):
         ids = [combo_set.index(combo) for combo in combos]
         return ids, combos, combo_set
 
+    @staticmethod
+    def scale_to_baseline(df):
+        idx = list(df.columns.get_level_values('time')).index(0)
+        scaled = df.divide(df.iloc[:, idx], axis=0)
+
+        # Can't zscore data if there is only one point in the vector
+        if scaled.shape[1] > 1:
+            normed = scaled.apply(zscore, axis=1, ddof=1).fillna(value=0)
+        else:
+            normed = scaled
+
+
+        return normed
+
     def standardize(self):
         """
         Normalize the data to the 0 timepoint.
@@ -425,21 +439,14 @@ class DEAnalysis(object):
         :return:
         """
         raw = self.data.copy()
-        for condition in self.conditions:
-            # Standardize genes at each timepoint
-            for tt in self.times:
-                data = raw.loc(axis=1)[condition, :, tt, :]
-                standard = np.nan_to_num(zscore(data, axis=0, ddof=1))
-                raw.loc(axis=1)[condition, :, tt, :] = standard
 
-            # Standardize genes across time
-            for rep in self.replicates:
-                data = raw.loc(axis=1)[condition, :, :, rep]
+        # Temporarily ignore invalid warnings. Zscore creates these if there are all uniform values (i.e. std=0)
+        # It is corrected in the scale_to_baseline function
+        np.seterr(invalid='ignore')
+        standardized = self.data.groupby(axis=1, level=[0, 3]).apply(self.scale_to_baseline)
+        np.seterr(invalid='warn')
 
-                if data.shape[1] > 2:
-                    raw.loc(axis=1)[condition, :, :, rep] = zscore(data, axis=1, ddof=1)
-
-        self.data = raw
+        return standardized
 
     def print_experiment_summary(self, verbose=False):
         """
