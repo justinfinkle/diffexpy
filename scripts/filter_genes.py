@@ -5,7 +5,7 @@ import numpy as np
 from pydiffexp.utils.io import read_dea_pickle
 from pydiffexp.utils.utils import column_unique
 import matplotlib.pyplot as plt
-from pydiffexp import DiffExpPlot
+from pydiffexp import DEPlot
 
 pd.set_option('display.width', 1000)
 
@@ -13,7 +13,7 @@ pd.set_option('display.width', 1000)
 dea = read_dea_pickle("./sprouty_pickle.pkl")
 print(dea.results['KO-WT'].F.shape)
 sys.exit()
-# dep = DiffExpPlot(dea)
+# dep = DiffExpPlot(dea)#
 # idx = pd.IndexSlice
 #
 # # print(dea.results['KO-WT'].top_table(p=0.05).shape)

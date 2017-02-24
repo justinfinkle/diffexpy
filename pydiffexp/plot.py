@@ -1,6 +1,6 @@
 import sys, inspect
 import pandas as pd
-import seaborn as sns; sns.set() # Don't set any parameters with seaborn
+import seaborn.apionly as sns
 import numpy as np
 from scipy import stats
 from collections import Counter
@@ -25,13 +25,13 @@ _colors = cbrewer.qualitative.Dark2_8.mpl_colors
 _paired = cbrewer.qualitative.Paired_9.mpl_colors
 
 
-class DiffExpPlot(object):
+class DEPlot(object):
     def __init__(self, dea):
         self.palette = _colors
         self.dea = dea                              # type: DEAnalysis
 
     def volcano_plot(self, df: pd.DataFrame, p_value: float = 0.05, fc=2, x_colname='logFC', y_colname='-log10p',
-                     cutoff_lines=True, top_n=None, top_by='-log10p', show_labels=False):
+                     cutoff_lines=True, top_n=None, top_by='-log10p', show_labels=False, **kwargs):
 
         # Get rid of NaN data
         df = df.dropna()
@@ -48,7 +48,7 @@ class DiffExpPlot(object):
         max_y = np.max(sig[y_colname])
         max_x = np.ceil(np.max(np.abs(sig[x_colname])))
 
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(**kwargs)
 
         # Split top data points if requested
         if top_n:

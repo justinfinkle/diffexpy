@@ -3,7 +3,7 @@ import pandas as pd
 from pydiffexp.utils.io import read_dea_pickle
 import numpy as np
 from pydiffexp.utils.utils import column_unique
-from pydiffexp import DiffExpPlot
+from pydiffexp import DEPlot
 import matplotlib.pyplot as plt
 
 pd.set_option('display.width', 1000)
@@ -12,7 +12,7 @@ pd.set_option('display.width', 1000)
 dea = read_dea_pickle("./sprouty_pickle.pkl")
 
 # Initialize a plotting object
-dep = DiffExpPlot(dea)
+dep = DEPlot(dea)
 
 dep.heatmap()
 
