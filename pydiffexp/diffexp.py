@@ -418,18 +418,17 @@ class DEAnalysis(object):
         return ids, combos, combo_set
 
     @staticmethod
-    def scale_to_baseline(df):
+    def scale_to_baseline(df, zscore=False, **zkwargs):
         idx = list(df.columns.get_level_values('time')).index(0)
-        scaled = df.divide(df.iloc[:, idx], axis=0)
+        scaled = df.divide(df.iloc[:, idx], axis=0).apply(np.log2)
 
-        # Can't zscore data if there is only one point in the vector
-        if scaled.shape[1] > 1:
-            normed = scaled.apply(zscore, axis=1, ddof=1).fillna(value=0)
-        else:
-            normed = scaled
+        if zscore:
+            # Can't zscore data if there is only one point in the vector
+            if scaled.shape[1] > 1:
+                normed = scaled.apply(zscore, axis=1, ddof=1, **zkwargs).fillna(value=0)
+                scaled = normed
 
-
-        return normed
+        return scaled
 
     def standardize(self):
         """

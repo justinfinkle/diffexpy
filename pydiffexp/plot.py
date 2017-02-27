@@ -1,10 +1,12 @@
-import sys, inspect
+import sys, inspect, warnings
+import itertools
 import pandas as pd
 import seaborn.apionly as sns
 import numpy as np
 from scipy import stats
 from collections import Counter
 from cycler import cycler
+from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import palettable.colorbrewer as cbrewer
@@ -23,6 +25,103 @@ mpl.rcParams['legend.fontsize'] = 24
 
 _colors = cbrewer.qualitative.Dark2_8.mpl_colors
 _paired = cbrewer.qualitative.Paired_9.mpl_colors
+
+
+def explained_variance_plot(pca, **kwargs):
+    cumulative_var = np.cumsum(pca.explained_variance_ratio_)
+    plt.bar(np.arange(len(cumulative_var)), cumulative_var, **kwargs)
+    plt.plot(pca.explained_variance_ratio_, '.-', c='r', ms=20, lw=3)
+    plt.xlim(-0.5, len(cumulative_var) - 0.5)
+    plt.xlabel('PC')
+    plt.ylabel('Cumulative Variance Explained')
+
+
+def pca_plot(pca, data, pc_combos='auto'):
+    # Determine number of PCs to include
+    cumulative_var = np.cumsum(pca.explained_variance_ratio_)
+    max_pc, _ = elbow_criteria(np.arange(len(cumulative_var)), cumulative_var)
+
+    if pc_combos == 'auto':
+        pc_combos = list(itertools.combinations(range(max_pc + 1), 2))
+
+    if len(pc_combos) > 4:
+        warnings.warn('The number of PC combos that will be plotted is > 4 and may not display nicely.')
+
+    fig = plt.figure()
+    nrows = len(pc_combos)
+    ncols = 2
+    transformed = pca.transform(data)
+    for row, pc_combo in enumerate(pc_combos):
+        print(row, row * 2 + 1, row * 2 + 2)
+        pc_disp = (pc_combo[0] + 1, pc_combo[1] + 1)
+        pc_var = (pca.explained_variance_ratio_[pc_combo[0]] * 100, pca.explained_variance_ratio_[pc_combo[1]] * 100)
+        # Make the scores plot
+        score_ax = fig.add_subplot(nrows, ncols, row * 2 + 1)
+        score_ax.plot(transformed[:, pc_combo[0]], transformed[:, pc_combo[1]], ".", mew=0)
+
+        # Make formatting changes
+        score_ax.set_xlim(-np.max(transformed[:, pc_combo[0]]), np.max(transformed[:, pc_combo[0]]))
+        score_ax.set_ylim(-np.max(transformed[:, pc_combo[1]]), np.max(transformed[:, pc_combo[1]]))
+        score_ax.set_xlabel(('PC %i, (%0.0f%%)' % (pc_disp[0], pc_var[0])))
+        score_ax.set_ylabel(('PC %i, (%0.0f%%)' % (pc_disp[1], pc_var[1])))
+        score_ax.axhline(linewidth=4, color="k", zorder=0)
+        score_ax.axvline(linewidth=4, color="k", zorder=0)
+
+        if row == 0:
+            score_ax.set_title('Scores')
+
+        # Make the loadings plot
+        loading_ax = fig.add_subplot(nrows, ncols, row * 2 + 2)
+
+        loading_ax.set_xlabel(('PC %i, (%0.0f%%)' % (pc_disp[0], pc_var[0])))
+        # loading_ax.set_ylabel(('Principal Component %i, (%0.0f%%)' % (pc_disp[1], pc_var[1])))
+
+        # Plot data
+        # pca.components_ is n_components by n_features. So each row represents the features projected into
+        # the component space
+        loading_ax.plot(pca.components_[pc_combo[0]], pca.components_[pc_combo[1]], ".", mew=0, ms=20)
+
+        # Add annotations
+        for ii, xy in enumerate(zip(pca.components_[pc_combo[0]], pca.components_[pc_combo[1]])):
+            plt.annotate(data.columns.values[ii], xy=xy, fontsize=16)
+
+        max_x = np.max(np.abs(pca.components_[pc_combo[0]]))
+        max_y = np.max(np.abs(pca.components_[pc_combo[1]]))
+        # loading_ax.set_xlim(-max_x, max_x)
+        # loading_ax.set_ylim(-max_y, max_y)
+        loading_ax.axhline(linewidth=4, color="k", zorder=0)
+        loading_ax.axvline(linewidth=4, color="k", zorder=0)
+
+        if row == 0:
+            loading_ax.set_title('Loadings')
+
+def point_slope(x1,y1, x2,y2):
+    slope = (y2-y1)/float(x2-x1)
+    return slope
+
+
+def elbow_criteria(x,y):
+    x = np.array(x)
+    y = np.array(y)
+    # Slope between elbow endpoints
+    m1 = point_slope(x[0], y[0], x[-1], y[-1])
+    # Intercept
+    b1 = y[0] - m1*x[0]
+
+    # Slope for perpendicular lines
+    m2 = -1/m1
+
+    # Calculate intercepts for perpendicular lines that go through data point
+    b_array = y-m2*x
+    x_perp = (b_array-b1)/(m1-m2)
+    y_perp = m1*x_perp+b1
+
+    # Calculate where the maximum distance to a line connecting endpoints is
+    distances = np.sqrt((x_perp-x)**2+(y_perp-y)**2)
+    index_max = np.where(distances==np.max(distances))[0][0]
+    elbow_x = x[index_max]
+    elbow_y = y[index_max]
+    return elbow_x, elbow_y
 
 
 class DEPlot(object):
