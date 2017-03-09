@@ -36,7 +36,7 @@ def explained_variance_plot(pca, **kwargs):
     plt.ylabel('Cumulative Variance Explained')
 
 
-def pca_plot(pca, data, pc_combos='auto'):
+def pca_plot(pca, data, pc_combos='auto', plots='both'):
     # Determine number of PCs to include
     cumulative_var = np.cumsum(pca.explained_variance_ratio_)
     max_pc, _ = elbow_criteria(np.arange(len(cumulative_var)), cumulative_var)
@@ -48,52 +48,69 @@ def pca_plot(pca, data, pc_combos='auto'):
         warnings.warn('The number of PC combos that will be plotted is > 4 and may not display nicely.')
 
     fig = plt.figure()
-    nrows = len(pc_combos)
-    ncols = 2
+
+    # 2 columns if plotting scores and loadings, else 1 column
+    if plots=='both':
+        nrows = len(pc_combos)
+        ncols = 2
+    else:
+        # Can implement smart grid in the future
+        nrows = len(pc_combos)
+        ncols = 1
+
     transformed = pca.transform(data)
     for row, pc_combo in enumerate(pc_combos):
-        print(row, row * 2 + 1, row * 2 + 2)
         pc_disp = (pc_combo[0] + 1, pc_combo[1] + 1)
         pc_var = (pca.explained_variance_ratio_[pc_combo[0]] * 100, pca.explained_variance_ratio_[pc_combo[1]] * 100)
-        # Make the scores plot
-        score_ax = fig.add_subplot(nrows, ncols, row * 2 + 1)
-        score_ax.plot(transformed[:, pc_combo[0]], transformed[:, pc_combo[1]], ".", mew=0)
 
-        # Make formatting changes
-        score_ax.set_xlim(-np.max(transformed[:, pc_combo[0]]), np.max(transformed[:, pc_combo[0]]))
-        score_ax.set_ylim(-np.max(transformed[:, pc_combo[1]]), np.max(transformed[:, pc_combo[1]]))
-        score_ax.set_xlabel(('PC %i, (%0.0f%%)' % (pc_disp[0], pc_var[0])))
-        score_ax.set_ylabel(('PC %i, (%0.0f%%)' % (pc_disp[1], pc_var[1])))
-        score_ax.axhline(linewidth=4, color="k", zorder=0)
-        score_ax.axvline(linewidth=4, color="k", zorder=0)
+        if plots!='loadings':
+            # Make the scores plot
+            if plots == 'both':
+                score_ax = fig.add_subplot(nrows, ncols, row * 2 + 1)
+            else:
+                score_ax = fig.add_subplot(nrows, ncols, row + 1)
+            score_ax.plot(transformed[:, pc_combo[0]], transformed[:, pc_combo[1]], ".", mew=0)
 
-        if row == 0:
-            score_ax.set_title('Scores')
+            # Make formatting changes
+            score_ax.set_xlim(-np.max(transformed[:, pc_combo[0]]), np.max(transformed[:, pc_combo[0]]))
+            score_ax.set_ylim(-np.max(transformed[:, pc_combo[1]]), np.max(transformed[:, pc_combo[1]]))
+            score_ax.set_xlabel(('PC %i, (%0.0f%%)' % (pc_disp[0], pc_var[0])))
+            score_ax.set_ylabel(('PC %i, (%0.0f%%)' % (pc_disp[1], pc_var[1])))
+            score_ax.axhline(linewidth=4, color="k", zorder=0)
+            score_ax.axvline(linewidth=4, color="k", zorder=0)
 
-        # Make the loadings plot
-        loading_ax = fig.add_subplot(nrows, ncols, row * 2 + 2)
+            if row == 0:
+                score_ax.set_title('Scores')
 
-        loading_ax.set_xlabel(('PC %i, (%0.0f%%)' % (pc_disp[0], pc_var[0])))
-        # loading_ax.set_ylabel(('Principal Component %i, (%0.0f%%)' % (pc_disp[1], pc_var[1])))
+        if plots != 'scores':
+            # Make the loadings plot
+            if plots == 'both':
+                loading_ax = fig.add_subplot(nrows, ncols, row * 2 + 2)
+            else:
+                loading_ax = fig.add_subplot(nrows, ncols, row + 1)
 
-        # Plot data
-        # pca.components_ is n_components by n_features. So each row represents the features projected into
-        # the component space
-        loading_ax.plot(pca.components_[pc_combo[0]], pca.components_[pc_combo[1]], ".", mew=0, ms=20)
+            loading_ax.set_xlabel(('PC %i, (%0.0f%%)' % (pc_disp[0], pc_var[0])))
+            loading_ax.set_ylabel(('Principal Component %i, (%0.0f%%)' % (pc_disp[1], pc_var[1])))
 
-        # Add annotations
-        for ii, xy in enumerate(zip(pca.components_[pc_combo[0]], pca.components_[pc_combo[1]])):
-            plt.annotate(data.columns.values[ii], xy=xy, fontsize=16)
+            # Plot data
+            # pca.components_ is n_components by n_features. So each row represents the features projected into
+            # the component space
+            loading_ax.plot(pca.components_[pc_combo[0]], pca.components_[pc_combo[1]], ".", mew=0, ms=20)
 
-        max_x = np.max(np.abs(pca.components_[pc_combo[0]]))
-        max_y = np.max(np.abs(pca.components_[pc_combo[1]]))
-        # loading_ax.set_xlim(-max_x, max_x)
-        # loading_ax.set_ylim(-max_y, max_y)
-        loading_ax.axhline(linewidth=4, color="k", zorder=0)
-        loading_ax.axvline(linewidth=4, color="k", zorder=0)
+            # Add annotations
+            for ii, xy in enumerate(zip(pca.components_[pc_combo[0]], pca.components_[pc_combo[1]])):
+                annotation = ' '.join(map(str, data.columns.values[ii]))
+                plt.annotate(annotation, xy=xy, fontsize=16)
 
-        if row == 0:
-            loading_ax.set_title('Loadings')
+            max_x = np.max(np.abs(pca.components_[pc_combo[0]]))
+            max_y = np.max(np.abs(pca.components_[pc_combo[1]]))
+            # loading_ax.set_xlim(-max_x, max_x)
+            # loading_ax.set_ylim(-max_y, max_y)
+            loading_ax.axhline(linewidth=4, color="k", zorder=0)
+            loading_ax.axvline(linewidth=4, color="k", zorder=0)
+
+            if row == 0:
+                loading_ax.set_title('Loadings')
 
 def point_slope(x1,y1, x2,y2):
     slope = (y2-y1)/float(x2-x1)
@@ -198,7 +215,7 @@ class DEPlot(object):
         ax.set_ylabel(r'$-log_{10}$(corrected p-value)')
         return ax
 
-    def add_ts(self, ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None, ci=0.83):
+    def add_ts(self, ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None, ci=0.83, fill=True, scatter=True):
         gene = data.name
         data = data.reset_index()
         grouped_data = data.groupby(subgroup)
@@ -217,22 +234,24 @@ class DEPlot(object):
         mean_kwargs = dict(mean_defaults, **mean_line_dict)
         mean_line, = ax.plot(grouped_stats[0], grouped_stats[1], **mean_kwargs)
         mean_color = mean_line.get_color()
-        jitter_x = data[subgroup]  # +(np.random.normal(0, 1, len(data)))
-        ax.plot(jitter_x, data[gene], '.', color=mean_color, ms=15, label='', alpha=0.5)
 
-        fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.2, label=(name + (' {:d}%CI'.format(int(ci * 100)))))
-        fill_kwargs = dict(fill_defaults, **fill_dict)
-        ax.fill_between(grouped_stats[0], grouped_stats[1] - grouped_stats[2] * grouped_stats[3],
-                        grouped_stats[1] + grouped_stats[2] * grouped_stats[3], **fill_kwargs)
+        if scatter:
+            jitter_x = data[subgroup]  # +(np.random.normal(0, 1, len(data)))
+            ax.plot(jitter_x, data[gene], '.', color=mean_color, ms=15, label='', alpha=0.5)
+        if fill:
+            fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.2, label=(name + (' {:d}%CI'.format(int(ci * 100)))))
+            fill_kwargs = dict(fill_defaults, **fill_dict)
+            ax.fill_between(grouped_stats[0], grouped_stats[1] - grouped_stats[2] * grouped_stats[3],
+                            grouped_stats[1] + grouped_stats[2] * grouped_stats[3], **fill_kwargs)
 
-    def tsplot(self, df, supergroup='condition', subgroup='time'):
+    def tsplot(self, df, supergroup='condition', subgroup='time', **kwargs):
         gene = df.name
         supers = sorted(list(set(df.index.get_level_values(supergroup))))
         fig, ax = plt.subplots()
         ax.set_prop_cycle(cycler('color', _colors))
         for sup in supers:
             sup_data = df.loc[sup]
-            self.add_ts(ax, sup_data, sup, subgroup=subgroup)
+            self.add_ts(ax, sup_data, sup, subgroup=subgroup, **kwargs)
         # ax.set_xlim([np.min(grouped_stats[0]), np.max(grouped_stats[0])])
         ax.legend(loc='best', numpoints=1)
         # ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda x, p: '{:,.0f}'.format(x)))
@@ -243,19 +262,20 @@ class DEPlot(object):
 
     def heatmap(self):
         der = self.dea.results['KO-WT']
+        cmap = sns.diverging_palette(30, 260, s=80, l=55, as_cmap=True)
         # np.random.seed(8)
         # idx = np.random.randint(0, len(self.dea.results['KO-WT'].top_table(p=0.05)), size=100)
         df = der.top_table(p=0.05)
         df = pd.concat([df, der.discrete_clusters.loc[df.index]], axis=1)
-        df.sort_values(['Cluster', 'adj_pval', 'AveExpr'], inplace=True, ascending=[False, True, False])
+        df.sort_values(['Cluster', 'adj_pval', 'AveExpr'], inplace=True, ascending=[True, True, False])
         # print(df)
         # sys.exit()
         # df = df.loc[self.dea.results['KO-WT'].discrete_clusters.loc[df.index].sort_values('Cluster').index]
         hm_data = df.iloc[:, :5]
         hm_data = np.abs(der.discrete.loc[df.index].values)*hm_data
         hm_data = hm_data[~(hm_data == 0).all(axis=1)]
-        cmap = sns.diverging_palette(30, 260, s=80, l=55, as_cmap=True)
-        g = sns.clustermap(hm_data, cmap=cmap, col_cluster=False, row_cluster=False)
+        hm_data.columns = [0, 15, 60, 120, 240]
+        g = sns.clustermap(hm_data, cmap=cmap, col_cluster=False, row_cluster=False, figsize=(5, 10))
         plt.setp(g.ax_heatmap.yaxis.get_majorticklabels(), rotation=0)
         g.ax_heatmap.yaxis.set_visible(False)
         plt.show()
