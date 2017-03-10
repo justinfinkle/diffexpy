@@ -100,6 +100,22 @@ class DEResults(MArrayLM):
         self.discrete = self.decide_tests(**self.discrete_kwargs)                       # type: pd.DataFrame
         self.discrete_clusters = self.cluster_discrete(self.discrete)                   # type: pd.DataFrame
         self.cluster_count = self.count_clusters(self.discrete_clusters)                # type: pd.DataFrame
+        self.all_results = self.aggregate_results()                                     # type: pd.DataFrame
+
+    def aggregate_results(self):
+        """
+        Make a hierarchical dataframe to include all results
+        :return:
+        """
+
+        # Make the multiindex
+        discrete = pd.concat([self.discrete_clusters, self.discrete], axis=1)           # type: pd.DataFrame
+        idx_array = [['discrete']*discrete.shape[1]+['continuous']*self.continuous.shape[1],
+                     discrete.columns.values.tolist()+self.continuous.columns.values.tolist()]
+        idx = pd.MultiIndex.from_arrays(idx_array, names=['dtype', 'label'])
+        hierarchical = pd.concat([discrete, self.continuous], axis=1)
+        hierarchical.columns = idx
+        return hierarchical
 
     def count_clusters(self, df, column='Cluster') -> pd.DataFrame:
         """
@@ -250,7 +266,9 @@ class DEAnalysis(object):
         self.contrast_robj = None           # type: robjects.vectors.Matrix
         self.fit = None                     # type: dict
         self.results = None                 # type: Dict[str, DEResults]
+        self.contrast_dict = {}             # type: dict
         self.decide = None                  # type: pd.DataFrame
+        self.db = None                      # type: pd.DataFrame
 
         if df is not None:
             self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels)
@@ -307,9 +325,19 @@ class DEAnalysis(object):
         return summary_df
 
     @staticmethod
-    def _contrast(v1, v2, fit_type, join_str='-'):
+    def _split_samples(x):
+        find_str = grepl('-', x)
+        if len(find_str) > 0:
+            x = [sample.replace('(', "").replace(')', '').split('-') for sample in x]
+            x = set().union(*x)
+        else:
+            x = set(x)
+        return x
+
+    def _contrast(self, v1, v2, fit_type, join_str='-'):
         contrast = {'contrasts': list(map(join_str.join, zip(v1, v2))),
-                    'fit_type': fit_type}
+                    'fit_type': fit_type,
+                    'samples': set(self._split_samples(v1)).union(self._split_samples(v2))}
         return contrast
 
     def possible_contrasts(self, p_idx=0):
@@ -399,6 +427,19 @@ class DEAnalysis(object):
         ids = [combo_set.index(combo) for combo in combos]
         return ids, combos, combo_set
 
+    @staticmethod
+    def scale_to_baseline(df, zscore=False, **zkwargs):
+        idx = list(df.columns.get_level_values('time')).index(0)
+        scaled = df.divide(df.iloc[:, idx], axis=0).apply(np.log2)
+
+        if zscore:
+            # Can't zscore data if there is only one point in the vector
+            if scaled.shape[1] > 1:
+                normed = scaled.apply(zscore, axis=1, ddof=1, **zkwargs).fillna(value=0)
+                scaled = normed
+
+        return scaled
+
     def standardize(self):
         """
         Normalize the data to the 0 timepoint.
@@ -407,21 +448,14 @@ class DEAnalysis(object):
         :return:
         """
         raw = self.data.copy()
-        for condition in self.conditions:
-            # Standardize genes at each timepoint
-            for tt in self.times:
-                data = raw.loc(axis=1)[condition, :, tt, :]
-                standard = np.nan_to_num(zscore(data, axis=0, ddof=1))
-                raw.loc(axis=1)[condition, :, tt, :] = standard
 
-            # Standardize genes across time
-            for rep in self.replicates:
-                data = raw.loc(axis=1)[condition, :, :, rep]
+        # Temporarily ignore invalid warnings. Zscore creates these if there are all uniform values (i.e. std=0)
+        # It is corrected in the scale_to_baseline function
+        np.seterr(invalid='ignore')
+        standardized = self.data.groupby(axis=1, level=[0, 3]).apply(self.scale_to_baseline)
+        np.seterr(invalid='warn')
 
-                if data.shape[1] > 2:
-                    raw.loc(axis=1)[condition, :, :, rep] = zscore(data, axis=1, ddof=1)
-
-        self.data = raw
+        return standardized
 
     def print_experiment_summary(self, verbose=False):
         """
@@ -440,14 +474,19 @@ class DEAnalysis(object):
                 unique = len(sorted(list(set(self.experiment_summary[col]))))
             print(col + "s:", unique)
 
-    def _make_model_matrix(self, formula='~0+x'):
+    def _make_model_matrix(self, columns=None, formula='~0+x'):
         """
         Make the stats model matrix in R
         :param: formula: str; R formula character used to create the model matrix
         :return:    R-matrix
         """
         # Make an robject for the model matrix
-        r_sample_labels = robjects.FactorVector(self.labels)
+        if columns is not None:
+            r_sample_labels = robjects.FactorVector(columns)
+            str_set = sorted(list(set(columns)))
+        else:
+            r_sample_labels = robjects.FactorVector(self.labels)
+            str_set = sorted(list(set(self.labels)))
 
         # Create R formula object, and change the environment variable
         fmla = robjects.Formula(formula)
@@ -455,7 +494,7 @@ class DEAnalysis(object):
 
         # Make the design matrix. stats is a bound R package
         design = stats.model_matrix(fmla)
-        design.colnames = robjects.StrVector(sorted(list(set(self.labels))))
+        design.colnames = robjects.StrVector(str_set)
         return design
 
     def _make_data_matrix(self):
@@ -510,19 +549,26 @@ class DEAnalysis(object):
         bayes_fit = limma.eBayes(contrast_fit)
         return bayes_fit
 
-    def _fit_contrast(self, contrast):
+    def _fit_contrast(self, contrasts, samples, data=None):
         """
         Fit the differential expression model using the supplied contrasts.
 
-        :param contrast:  str, list, or dict; contrasts to test for differential expression. Strings and elements of
+        :param contrasts:  str, list, or dict; contrasts to test for differential expression. Strings and elements of
         lists must be in the format "X-Y". Dictionary elements must be in {contrast_name:"(X1-X0)-(Y1-Y0)").
         :return:
         """
+
+        # Subset data and design to match contrast samples
+        data = rh.pydf_to_rmat(rh.rvect_to_py(self.data_matrix).loc[:, samples])
+        design = self._make_model_matrix(rh.rvect_to_py(data.colnames))
+        # design = rh.rvect_to_py(self.design).loc[:, samples]
+        # design = rh.pydf_to_rmat(design[(design == 1).any(axis=1)])
+
         # Setup contrast matrix
-        contrast_robj = self._make_contrasts(contrasts=contrast, levels=self.design)
+        contrast_robj = self._make_contrasts(contrasts=contrasts, levels=design)
 
         # Perform a linear fit_contrasts, then empirical bayes fit_contrasts
-        linear_fit = limma.lmFit(self.data_matrix, self.design)
+        linear_fit = limma.lmFit(data, design)
         fit = self._ebayes(linear_fit, contrast_robj)
 
         return fit
@@ -535,10 +581,9 @@ class DEAnalysis(object):
         :param contrasts:
         :return:
         """
-
         # Make fit dictionary
-        fits = {name: DEResults(self._fit_contrast(contrast['contrasts']), name=name, fit_type=contrast['fit_type'])
-                for name, contrast in contrast_dict.items()}
+        fits = {name: DEResults(self._fit_contrast(contrast['contrasts'], contrast['samples']), name=name,
+                                fit_type=contrast['fit_type']) for name, contrast in contrast_dict.items()}
         return fits
 
     def fit_contrasts(self, contrasts=None, names=None, fit_types=None, fit_defaults=True):
@@ -587,6 +632,40 @@ class DEAnalysis(object):
             all_contrasts = dict(all_contrasts, **user_contrasts)
 
         self.results = self._fit_dict(all_contrasts)
+
+        # Add/Update Results dictionary
+        self.contrast_dict = self.match_contrasts()
+        self.db = self.make_results_db()
+
+    def match_contrasts(self) -> dict:
+        """
+        Make a dictionary of {contrast: [DERs]} for easy referencing.
+
+        :return: dict; format is {contrast: [DERs]}. Most values should be lists of length 1. Lists longer than 1
+        indicate that the same contrast is present in multiple DERs. The values should be equivalent between DERs,
+        however adjusted p-values may change slightly due to varied multiple hypothesis correction.
+        """
+
+        contrast_dict = {}
+        for key, der in self.results.items():
+            for c in der.contrast_list:
+                if c in contrast_dict:
+                    contrast_dict[c].append(key)
+                else:
+                    contrast_dict[c] = [key]
+        return contrast_dict
+
+    def make_results_db(self):
+        """
+        Compile the DER hierarchical results into a large dataframe, to rule them all. This should obviously be improved
+        into a better datastructure
+        :return:
+        """
+        der_results = [der.all_results for der in self.results.values()]
+        db = pd.concat(der_results, axis=1, keys=self.results.keys(),
+                       names=['fit', 'dtype', 'label'])                         # type: pd.DataFrame
+        db.sort_index(axis=1, inplace=True, level=0)
+        return db
 
     def to_pickle(self, path):
         # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame

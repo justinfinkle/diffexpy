@@ -1,3 +1,4 @@
+import sys
 import pandas as pd
 import numpy as np
 import rpy2.robjects as robj
@@ -24,6 +25,19 @@ def rdf_to_pydf(x):
     df = pandas2ri.ri2py(x)
     pandas2ri.deactivate()
     return df
+
+
+def pydf_to_rmat(x) -> robj.vectors.Matrix:
+    """
+    Convert a pandas dataframe to an R matrix
+    :param x:
+    :return:
+    """
+    r_matrix = robj.r.matrix(x.values, nrow=x.shape[0], ncol=x.shape[1])
+    r_matrix.colnames = robj.StrVector(x.columns.values)
+    r_matrix.rownames = robj.StrVector(x.index.values)
+
+    return r_matrix
 
 
 def rvect_to_py(vector):
@@ -59,7 +73,8 @@ def rvect_to_py(vector):
         x = np.array(vector).astype(str)
 
     # If it is an array with just one value, unpack that (e.g. Str, Int, and Float)
-    if isinstance(x, np.ndarray) & len(x) == 1:
-        x = x[0]
+    if x is not None:
+        if isinstance(x, np.ndarray) & len(x) == 1:
+            x = x[0]
 
     return x

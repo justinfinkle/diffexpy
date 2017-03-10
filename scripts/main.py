@@ -6,7 +6,7 @@ import pandas as pd
 from pydiffexp import DEAnalysis
 
 # Load the data
-test_path = "/Users/jfinkle/Documents/Northwestern/MoDyLS/Python/sprouty/data/raw_data/all_data_formatted.csv"
+test_path = "/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/sprouty/data/raw_data/all_data_formatted.csv"
 raw_data = pd.read_csv(test_path, index_col=0)
 hierarchy = ['condition', 'well', 'time', 'replicate']
 
@@ -17,7 +17,12 @@ raw_data[raw_data <= 0] = 1
 # The reference labels specify how samples will be organized into unique values
 dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition', 'time'])
 
+# Data can be standarized if desired
+# norm_data = dea.standardize()
+
 # Fit the contrasts and save the object
 dea.fit_contrasts()
-dea.to_pickle("./sprouty_pickle.pkl")
+print(dea.results['KO_ar'].discrete_clusters.loc['FAM110C'])
+print(dea.results['WT_ar'].discrete_clusters.loc['FAM110C'])
+# dea.to_pickle("./sprouty_pickle.pkl")
 

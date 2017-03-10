@@ -1,9 +1,12 @@
-import sys, inspect
+import sys, inspect, warnings
+import itertools
 import pandas as pd
+import seaborn.apionly as sns
 import numpy as np
 from scipy import stats
 from collections import Counter
 from cycler import cycler
+from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import palettable.colorbrewer as cbrewer
@@ -24,13 +27,127 @@ _colors = cbrewer.qualitative.Dark2_8.mpl_colors
 _paired = cbrewer.qualitative.Paired_9.mpl_colors
 
 
-class DiffExpPlot(object):
+def explained_variance_plot(pca, **kwargs):
+    cumulative_var = np.cumsum(pca.explained_variance_ratio_)
+    plt.bar(np.arange(len(cumulative_var)), cumulative_var, **kwargs)
+    plt.plot(pca.explained_variance_ratio_, '.-', c='r', ms=20, lw=3)
+    plt.xlim(-0.5, len(cumulative_var) - 0.5)
+    plt.xlabel('PC')
+    plt.ylabel('Cumulative Variance Explained')
+
+
+def pca_plot(pca, data, pc_combos='auto', plots='both'):
+    # Determine number of PCs to include
+    cumulative_var = np.cumsum(pca.explained_variance_ratio_)
+    max_pc, _ = elbow_criteria(np.arange(len(cumulative_var)), cumulative_var)
+
+    if pc_combos == 'auto':
+        pc_combos = list(itertools.combinations(range(max_pc + 1), 2))
+
+    if len(pc_combos) > 4:
+        warnings.warn('The number of PC combos that will be plotted is > 4 and may not display nicely.')
+
+    fig = plt.figure()
+
+    # 2 columns if plotting scores and loadings, else 1 column
+    if plots=='both':
+        nrows = len(pc_combos)
+        ncols = 2
+    else:
+        # Can implement smart grid in the future
+        nrows = len(pc_combos)
+        ncols = 1
+
+    transformed = pca.transform(data)
+    for row, pc_combo in enumerate(pc_combos):
+        pc_disp = (pc_combo[0] + 1, pc_combo[1] + 1)
+        pc_var = (pca.explained_variance_ratio_[pc_combo[0]] * 100, pca.explained_variance_ratio_[pc_combo[1]] * 100)
+
+        if plots!='loadings':
+            # Make the scores plot
+            if plots == 'both':
+                score_ax = fig.add_subplot(nrows, ncols, row * 2 + 1)
+            else:
+                score_ax = fig.add_subplot(nrows, ncols, row + 1)
+            score_ax.plot(transformed[:, pc_combo[0]], transformed[:, pc_combo[1]], ".", mew=0)
+
+            # Make formatting changes
+            score_ax.set_xlim(-np.max(transformed[:, pc_combo[0]]), np.max(transformed[:, pc_combo[0]]))
+            score_ax.set_ylim(-np.max(transformed[:, pc_combo[1]]), np.max(transformed[:, pc_combo[1]]))
+            score_ax.set_xlabel(('PC %i, (%0.0f%%)' % (pc_disp[0], pc_var[0])))
+            score_ax.set_ylabel(('PC %i, (%0.0f%%)' % (pc_disp[1], pc_var[1])))
+            score_ax.axhline(linewidth=4, color="k", zorder=0)
+            score_ax.axvline(linewidth=4, color="k", zorder=0)
+
+            if row == 0:
+                score_ax.set_title('Scores')
+
+        if plots != 'scores':
+            # Make the loadings plot
+            if plots == 'both':
+                loading_ax = fig.add_subplot(nrows, ncols, row * 2 + 2)
+            else:
+                loading_ax = fig.add_subplot(nrows, ncols, row + 1)
+
+            loading_ax.set_xlabel(('PC %i, (%0.0f%%)' % (pc_disp[0], pc_var[0])))
+            loading_ax.set_ylabel(('Principal Component %i, (%0.0f%%)' % (pc_disp[1], pc_var[1])))
+
+            # Plot data
+            # pca.components_ is n_components by n_features. So each row represents the features projected into
+            # the component space
+            loading_ax.plot(pca.components_[pc_combo[0]], pca.components_[pc_combo[1]], ".", mew=0, ms=20)
+
+            # Add annotations
+            for ii, xy in enumerate(zip(pca.components_[pc_combo[0]], pca.components_[pc_combo[1]])):
+                annotation = ' '.join(map(str, data.columns.values[ii]))
+                plt.annotate(annotation, xy=xy, fontsize=16)
+
+            max_x = np.max(np.abs(pca.components_[pc_combo[0]]))
+            max_y = np.max(np.abs(pca.components_[pc_combo[1]]))
+            # loading_ax.set_xlim(-max_x, max_x)
+            # loading_ax.set_ylim(-max_y, max_y)
+            loading_ax.axhline(linewidth=4, color="k", zorder=0)
+            loading_ax.axvline(linewidth=4, color="k", zorder=0)
+
+            if row == 0:
+                loading_ax.set_title('Loadings')
+
+def point_slope(x1,y1, x2,y2):
+    slope = (y2-y1)/float(x2-x1)
+    return slope
+
+
+def elbow_criteria(x,y):
+    x = np.array(x)
+    y = np.array(y)
+    # Slope between elbow endpoints
+    m1 = point_slope(x[0], y[0], x[-1], y[-1])
+    # Intercept
+    b1 = y[0] - m1*x[0]
+
+    # Slope for perpendicular lines
+    m2 = -1/m1
+
+    # Calculate intercepts for perpendicular lines that go through data point
+    b_array = y-m2*x
+    x_perp = (b_array-b1)/(m1-m2)
+    y_perp = m1*x_perp+b1
+
+    # Calculate where the maximum distance to a line connecting endpoints is
+    distances = np.sqrt((x_perp-x)**2+(y_perp-y)**2)
+    index_max = np.where(distances==np.max(distances))[0][0]
+    elbow_x = x[index_max]
+    elbow_y = y[index_max]
+    return elbow_x, elbow_y
+
+
+class DEPlot(object):
     def __init__(self, dea):
         self.palette = _colors
         self.dea = dea                              # type: DEAnalysis
 
     def volcano_plot(self, df: pd.DataFrame, p_value: float = 0.05, fc=2, x_colname='logFC', y_colname='-log10p',
-                     cutoff_lines=True, top_n=None, top_by='-log10p', show_labels=False):
+                     cutoff_lines=True, top_n=None, top_by='-log10p', show_labels=False, **kwargs):
 
         # Get rid of NaN data
         df = df.dropna()
@@ -47,7 +164,7 @@ class DiffExpPlot(object):
         max_y = np.max(sig[y_colname])
         max_x = np.ceil(np.max(np.abs(sig[x_colname])))
 
-        fig, ax = plt.subplots(figsize=(10, 10))
+        fig, ax = plt.subplots(**kwargs)
 
         # Split top data points if requested
         if top_n:
@@ -98,12 +215,13 @@ class DiffExpPlot(object):
         ax.set_ylabel(r'$-log_{10}$(corrected p-value)')
         return ax
 
-    def add_ts(self, ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None, ci=0.83):
+    def add_ts(self, ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None, ci=0.83, fill=True, scatter=True):
         gene = data.name
         data = data.reset_index()
         grouped_data = data.groupby(subgroup)
 
         # Get plotting statistics. Rows are: group, mean, SE, and Tstat
+        #todo: Use groupby more appropriately to get stats
         grouped_stats = np.array(
             [[g, np.mean(data[gene]), stats.sem(data[gene]), stats.t.ppf(1 - (1 - ci) / 2, df=len(data) - 1)]
              for g, data in grouped_data]).T
@@ -116,22 +234,24 @@ class DiffExpPlot(object):
         mean_kwargs = dict(mean_defaults, **mean_line_dict)
         mean_line, = ax.plot(grouped_stats[0], grouped_stats[1], **mean_kwargs)
         mean_color = mean_line.get_color()
-        jitter_x = data[subgroup]  # +(np.random.normal(0, 1, len(data)))
-        ax.plot(jitter_x, data[gene], '.', color=mean_color, ms=15, label='', alpha=0.5)
 
-        fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.2, label=(name + (' {:d}%CI'.format(int(ci * 100)))))
-        fill_kwargs = dict(fill_defaults, **fill_dict)
-        ax.fill_between(grouped_stats[0], grouped_stats[1] - grouped_stats[2] * grouped_stats[3],
-                        grouped_stats[1] + grouped_stats[2] * grouped_stats[3], **fill_kwargs)
+        if scatter:
+            jitter_x = data[subgroup]  # +(np.random.normal(0, 1, len(data)))
+            ax.plot(jitter_x, data[gene], '.', color=mean_color, ms=15, label='', alpha=0.5)
+        if fill:
+            fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.2, label=(name + (' {:d}%CI'.format(int(ci * 100)))))
+            fill_kwargs = dict(fill_defaults, **fill_dict)
+            ax.fill_between(grouped_stats[0], grouped_stats[1] - grouped_stats[2] * grouped_stats[3],
+                            grouped_stats[1] + grouped_stats[2] * grouped_stats[3], **fill_kwargs)
 
-    def tsplot(self, df, supergroup='condition', subgroup='time'):
+    def tsplot(self, df, supergroup='condition', subgroup='time', **kwargs):
         gene = df.name
         supers = sorted(list(set(df.index.get_level_values(supergroup))))
         fig, ax = plt.subplots()
         ax.set_prop_cycle(cycler('color', _colors))
         for sup in supers:
             sup_data = df.loc[sup]
-            self.add_ts(ax, sup_data, sup, subgroup=subgroup)
+            self.add_ts(ax, sup_data, sup, subgroup=subgroup, **kwargs)
         # ax.set_xlim([np.min(grouped_stats[0]), np.max(grouped_stats[0])])
         ax.legend(loc='best', numpoints=1)
         # ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda x, p: '{:,.0f}'.format(x)))
@@ -139,6 +259,27 @@ class DiffExpPlot(object):
         ax.set_ylabel('Expression')
         ax.set_title(gene)
         return ax
+
+    def heatmap(self):
+        der = self.dea.results['KO-WT']
+        cmap = sns.diverging_palette(30, 260, s=80, l=55, as_cmap=True)
+        # np.random.seed(8)
+        # idx = np.random.randint(0, len(self.dea.results['KO-WT'].top_table(p=0.05)), size=100)
+        df = der.top_table(p=0.05)
+        df = pd.concat([df, der.discrete_clusters.loc[df.index]], axis=1)
+        df.sort_values(['Cluster', 'adj_pval', 'AveExpr'], inplace=True, ascending=[True, True, False])
+        # print(df)
+        # sys.exit()
+        # df = df.loc[self.dea.results['KO-WT'].discrete_clusters.loc[df.index].sort_values('Cluster').index]
+        hm_data = df.iloc[:, :5]
+        hm_data = np.abs(der.discrete.loc[df.index].values)*hm_data
+        hm_data = hm_data[~(hm_data == 0).all(axis=1)]
+        hm_data.columns = [0, 15, 60, 120, 240]
+        g = sns.clustermap(hm_data, cmap=cmap, col_cluster=False, row_cluster=False, figsize=(5, 10))
+        plt.setp(g.ax_heatmap.yaxis.get_majorticklabels(), rotation=0)
+        g.ax_heatmap.yaxis.set_visible(False)
+        plt.show()
+
 
     def make_path_dict(self, condition, max_sw, min_sw=0.0, path='all', dc_df=None, genes=None, norm=None):
         """ Creates a dictionary mapping paths to normalized gene counts
