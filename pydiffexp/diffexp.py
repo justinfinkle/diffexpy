@@ -474,14 +474,19 @@ class DEAnalysis(object):
                 unique = len(sorted(list(set(self.experiment_summary[col]))))
             print(col + "s:", unique)
 
-    def _make_model_matrix(self, formula='~0+x'):
+    def _make_model_matrix(self, columns=None, formula='~0+x'):
         """
         Make the stats model matrix in R
         :param: formula: str; R formula character used to create the model matrix
         :return:    R-matrix
         """
         # Make an robject for the model matrix
-        r_sample_labels = robjects.FactorVector(self.labels)
+        if columns is not None:
+            r_sample_labels = robjects.FactorVector(columns)
+            str_set = sorted(list(set(columns)))
+        else:
+            r_sample_labels = robjects.FactorVector(self.labels)
+            str_set = sorted(list(set(self.labels)))
 
         # Create R formula object, and change the environment variable
         fmla = robjects.Formula(formula)
@@ -489,7 +494,7 @@ class DEAnalysis(object):
 
         # Make the design matrix. stats is a bound R package
         design = stats.model_matrix(fmla)
-        design.colnames = robjects.StrVector(sorted(list(set(self.labels))))
+        design.colnames = robjects.StrVector(str_set)
         return design
 
     def _make_data_matrix(self):
@@ -555,11 +560,9 @@ class DEAnalysis(object):
 
         # Subset data and design to match contrast samples
         data = rh.pydf_to_rmat(rh.rvect_to_py(self.data_matrix).loc[:, samples])
-        design = rh.rvect_to_py(self.design).loc[:, samples]
-        design = rh.pydf_to_rmat(design[(design == 1).any(axis=1)])
-
-        print(contrasts)
-        print(rh.rvect_to_py(data).head())
+        design = self._make_model_matrix(rh.rvect_to_py(data.colnames))
+        # design = rh.rvect_to_py(self.design).loc[:, samples]
+        # design = rh.pydf_to_rmat(design[(design == 1).any(axis=1)])
 
         # Setup contrast matrix
         contrast_robj = self._make_contrasts(contrasts=contrasts, levels=design)

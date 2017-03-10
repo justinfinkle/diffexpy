@@ -27,7 +27,7 @@ def rdf_to_pydf(x):
     return df
 
 
-def pydf_to_rmat(x):
+def pydf_to_rmat(x) -> robj.vectors.Matrix:
     """
     Convert a pandas dataframe to an R matrix
     :param x:

@@ -22,6 +22,7 @@ dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition',
 
 # Fit the contrasts and save the object
 dea.fit_contrasts()
-print(dea.results['KO_ar'].continuous.loc['FAM110C'])
+print(dea.results['KO_ar'].discrete_clusters.loc['FAM110C'])
+print(dea.results['WT_ar'].discrete_clusters.loc['FAM110C'])
 # dea.to_pickle("./sprouty_pickle.pkl")
 
