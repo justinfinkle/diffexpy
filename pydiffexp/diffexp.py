@@ -325,9 +325,19 @@ class DEAnalysis(object):
         return summary_df
 
     @staticmethod
-    def _contrast(v1, v2, fit_type, join_str='-'):
+    def _split_samples(x):
+        find_str = grepl('-', x)
+        if len(find_str) > 0:
+            x = [sample.replace('(', "").replace(')', '').split('-') for sample in x]
+            x = set().union(*x)
+        else:
+            x = set(x)
+        return x
+
+    def _contrast(self, v1, v2, fit_type, join_str='-'):
         contrast = {'contrasts': list(map(join_str.join, zip(v1, v2))),
-                    'fit_type': fit_type}
+                    'fit_type': fit_type,
+                    'samples': set(self._split_samples(v1)).union(self._split_samples(v2))}
         return contrast
 
     def possible_contrasts(self, p_idx=0):
@@ -534,19 +544,28 @@ class DEAnalysis(object):
         bayes_fit = limma.eBayes(contrast_fit)
         return bayes_fit
 
-    def _fit_contrast(self, contrast):
+    def _fit_contrast(self, contrasts, samples, data=None):
         """
         Fit the differential expression model using the supplied contrasts.
 
-        :param contrast:  str, list, or dict; contrasts to test for differential expression. Strings and elements of
+        :param contrasts:  str, list, or dict; contrasts to test for differential expression. Strings and elements of
         lists must be in the format "X-Y". Dictionary elements must be in {contrast_name:"(X1-X0)-(Y1-Y0)").
         :return:
         """
+
+        # Subset data and design to match contrast samples
+        data = rh.pydf_to_rmat(rh.rvect_to_py(self.data_matrix).loc[:, samples])
+        design = rh.rvect_to_py(self.design).loc[:, samples]
+        design = rh.pydf_to_rmat(design[(design == 1).any(axis=1)])
+
+        print(contrasts)
+        print(rh.rvect_to_py(data).head())
+
         # Setup contrast matrix
-        contrast_robj = self._make_contrasts(contrasts=contrast, levels=self.design)
+        contrast_robj = self._make_contrasts(contrasts=contrasts, levels=design)
 
         # Perform a linear fit_contrasts, then empirical bayes fit_contrasts
-        linear_fit = limma.lmFit(self.data_matrix, self.design)
+        linear_fit = limma.lmFit(data, design)
         fit = self._ebayes(linear_fit, contrast_robj)
 
         return fit
@@ -559,10 +578,9 @@ class DEAnalysis(object):
         :param contrasts:
         :return:
         """
-
         # Make fit dictionary
-        fits = {name: DEResults(self._fit_contrast(contrast['contrasts']), name=name, fit_type=contrast['fit_type'])
-                for name, contrast in contrast_dict.items()}
+        fits = {name: DEResults(self._fit_contrast(contrast['contrasts'], contrast['samples']), name=name,
+                                fit_type=contrast['fit_type']) for name, contrast in contrast_dict.items()}
         return fits
 
     def fit_contrasts(self, contrasts=None, names=None, fit_types=None, fit_defaults=True):

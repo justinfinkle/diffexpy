@@ -18,9 +18,10 @@ raw_data[raw_data <= 0] = 1
 dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition', 'time'])
 
 # Data can be standarized if desired
-norm_data = dea.standardize()
+# norm_data = dea.standardize()
 
 # Fit the contrasts and save the object
-# dea.fit_contrasts()
+dea.fit_contrasts()
+print(dea.results['KO_ar'].continuous.loc['FAM110C'])
 # dea.to_pickle("./sprouty_pickle.pkl")
 
