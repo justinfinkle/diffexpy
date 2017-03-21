@@ -142,7 +142,7 @@ def elbow_criteria(x,y):
 
 
 class DEPlot(object):
-    def __init__(self, dea):
+    def __init__(self, dea=None):
         self.palette = _colors
         self.dea = dea                              # type: DEAnalysis
 
