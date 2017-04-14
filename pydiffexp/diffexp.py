@@ -240,7 +240,7 @@ class DEAnalysis(object):
     """
 
     def __init__(self, df=None, index_names=None, split_str='_', time='time', condition='condition',
-                 replicate='replicate', reference_labels=None):
+                 replicate='replicate', reference_labels=None, voom=False):
         """
 
         :param df:
@@ -257,6 +257,7 @@ class DEAnalysis(object):
         self.times = None                   # type: list
         self.conditions = None              # type: list
         self.replicates = None              # type: list
+        self.voom = voom                    # type: bool
         self.default_contrasts = None
         self.timeseries = False             # type: bool
         self.samples = None                 # type: list
@@ -271,7 +272,8 @@ class DEAnalysis(object):
         self.db = None                      # type: pd.DataFrame
 
         if df is not None:
-            self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels)
+            self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels,
+                           voom=voom)
             if time is not None:
                 self.times = sorted(map(int_or_float, list(set(self.experiment_summary[time]))))
                 if len(self.times) > 1:
@@ -280,7 +282,7 @@ class DEAnalysis(object):
             self.default_contrasts = self.possible_contrasts()
             self.replicates = sorted(list(set(self.experiment_summary[replicate])))
 
-    def _set_data(self, df, index_names=None, split_str='_', reference_labels=None):
+    def _set_data(self, df, index_names=None, split_str='_', reference_labels=None, voom=False):
         # Check for a multiindex or try making one
         multiindex = mi.is_multiindex(df)
         h_df = None
@@ -304,7 +306,7 @@ class DEAnalysis(object):
 
         self.experiment_summary = self.get_experiment_summary(reference_labels=reference_labels)
         self.design = self._make_model_matrix()
-        self.data_matrix = self._make_data_matrix()
+        self.data_matrix = self._make_data_matrix(voom=voom)
 
     def get_experiment_summary(self, reference_labels=None):
         """
@@ -497,7 +499,7 @@ class DEAnalysis(object):
         design.colnames = robjects.StrVector(str_set)
         return design
 
-    def _make_data_matrix(self):
+    def _make_data_matrix(self, voom):
         """
         Make the data matrix as an R object
         :return:
@@ -505,18 +507,18 @@ class DEAnalysis(object):
         # Get the sample labels, genes, and data
         genes = self.data.index.values
 
-        # Log transform expression and correct values if needed
-        data = np.log2(self.data.values)
-        # data = self.data.values
-        if np.sum(np.isnan(data)) > 0:
-            warnings.warn("NaNs detected during log expression transformation. Setting NaN values to zero.")
-            data = np.nan_to_num(data)
-
-        # Make r matrix object
-        nr, nc = data.shape
-        r_matrix = robjects.r.matrix(data, nrow=nr, ncol=nc)
-        r_matrix.colnames = robjects.StrVector(self.labels)
-        r_matrix.rownames = robjects.StrVector(genes)
+        if voom:
+            r_data = rh.pydf_to_rmat(self.data)
+            voom_results = rh.unpack_r_listvector(limma.voom(r_data))
+            data = voom_results['E']
+        else:
+            # Log transform expression and correct values if needed
+            data = np.log2(self.data)
+            # data = self.data.values
+            if np.sum(np.isnan(data.values)) > 0:
+                warnings.warn("NaNs detected during log expression transformation. Setting NaN values to zero.")
+                data = np.nan_to_num(data)
+        r_matrix = rh.pydf_to_rmat(data)
         return r_matrix
 
     @staticmethod

@@ -40,7 +40,7 @@ def pydf_to_rmat(x) -> robj.vectors.Matrix:
     return r_matrix
 
 
-def rvect_to_py(vector):
+def rvect_to_py(vector, force_list=False):
     """
     Convert an R vector to its appropriate python equivalent
     :param vector:
@@ -54,7 +54,12 @@ def rvect_to_py(vector):
 
     # Matrix
     elif isinstance(vector, robj.vectors.Matrix):
-        x = pd.DataFrame(np.array(vector), index=vector.rownames, columns=vector.colnames)
+        x = pd.DataFrame(np.array(vector))
+        if vector.rownames != robj.NULL:
+            x.index = rvect_to_py(vector.rownames, force_list=True)
+        if vector.colnames != robj.NULL:
+            x.columns = rvect_to_py(vector.colnames, force_list=True)
+
 
     # Integers
     elif isinstance(vector, robj.vectors.IntVector):
@@ -74,7 +79,7 @@ def rvect_to_py(vector):
 
     # If it is an array with just one value, unpack that (e.g. Str, Int, and Float)
     if x is not None:
-        if isinstance(x, np.ndarray) & len(x) == 1:
+        if isinstance(x, np.ndarray) & (len(x) == 1) & ~force_list:
             x = x[0]
 
     return x
