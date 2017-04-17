@@ -25,9 +25,9 @@ dea.fit_contrasts()
 dep = DEPlot(dea)
 
 # Volcano Plot
-x = dea.results[0].top_table()
+x = dea.results[0].top_table(coef=1, use_fstat=False)
 print(x.head())
-sys.exit()
-dep.volcano_plot(x, top_n=5, show_labels=True)
+dep.volcano_plot(x, top_n=5, show_labels=True, top_by=['-log10p', 'logFC'])
+plt.tight_layout()
 plt.show()
 # dea.to_pickle("./sprouty_pickle.pkl")
