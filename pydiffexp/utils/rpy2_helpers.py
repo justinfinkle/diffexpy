@@ -44,6 +44,7 @@ def rvect_to_py(vector, force_list=False):
     """
     Convert an R vector to its appropriate python equivalent
     :param vector:
+    :param force_list: bool; force the output to be a list. Default (False) returns lists only if len > 1
     :return:
     """
     x = None
@@ -55,6 +56,8 @@ def rvect_to_py(vector, force_list=False):
     # Matrix
     elif isinstance(vector, robj.vectors.Matrix):
         x = pd.DataFrame(np.array(vector))
+
+        # Correct if row and column names do not exist
         if vector.rownames != robj.NULL:
             x.index = rvect_to_py(vector.rownames, force_list=True)
         if vector.colnames != robj.NULL:
