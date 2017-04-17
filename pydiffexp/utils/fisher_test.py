@@ -45,7 +45,21 @@ def convert_gene_to_tf(gene_list, gene_dict):
             tf_list = tf_list+gene_dict[gene]
         else:
             continue
-    return tf_list
+
+    tf_dict = {tf: [] for tf in tf_list}
+
+    # Add genes associated with each tf
+    for k in tf_dict.keys():
+        for gene in gene_list:
+            if gene in gene_dict.keys():
+                if k in gene_dict[gene]:
+                    tf_dict[k].append(gene)
+                else:
+                    continue
+            else:
+                continue
+
+    return tf_list, tf_dict
 
 
 def calculate_study_enrichment(study_term_list, background_term_list, fdr=0.05):
@@ -71,7 +85,7 @@ def calculate_study_enrichment(study_term_list, background_term_list, fdr=0.05):
     # Make results table
     results_table = pd.DataFrame(np.vstack((p_values, corrected_p)).T, columns=['p_uncorrected', 'p_bonferroni'])
     results_table.insert(0, 'TF', study_term_set)
-    results_table.sort_values(by='p_uncorrected', inplace=True)
+    results_table.sort_values('p_uncorrected', inplace=True)
 
     #FDR correcton
     results_table['FDR_thresh'] = np.arange(1, len(results_table)+1)/float(len(results_table))*fdr
@@ -93,9 +107,9 @@ def fisher_score(x, study_list, background_list):
         The p-value associated with the term
     """
     c_table = make_contingency_table(x, study_list, background_list)
+
+    # One sided test looking for over-representation so use 'greater'
     _, pvalue = fisher_exact(c_table, alternative='greater')
-    # print x, pvalue, c_table.astype(int)
-    # raw_input()
     return pvalue
 
 

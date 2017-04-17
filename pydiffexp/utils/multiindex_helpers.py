@@ -17,7 +17,7 @@ def is_multiindex(df):
     return tuple(mi)
 
 
-def make_hierarchical(df, index_names=None, split_str='_', keep_original=False) -> pd.DataFrame:
+def make_multiindex(df, index_names=None, split_str='_', keep_original=False) -> pd.DataFrame:
     """
     Make a regular dataframe hierarchical by adding a MultiIndex
     :param df: dataframe; the dataframe to made hierarchical
