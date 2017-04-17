@@ -278,8 +278,6 @@ class DEAnalysis(object):
 
             # Determine if data is timeseries
             self.times, self.timeseries = self._is_timeseries(time_var=time)
-            print(self.times, self.timeseries)
-            sys.exit()
 
             # Determine conditions and replicates of experiment
             self.conditions = sorted(list(set(self.experiment_summary[condition])))
@@ -435,7 +433,7 @@ class DEAnalysis(object):
                 contrasts["(%s)_ar" % de] = self._contrast(base_de[1:], ar_de, fit_type='DE-AR')
             expected_contrasts = contrasts
         else:
-            expected_contrasts = list(map('-'.join, itertools.permutations(self.conditions, 2)))
+            expected_contrasts = list(map('-'.join, itertools.combinations(self.conditions, 2)))
         return expected_contrasts
 
     def suggest_contrasts(self):
@@ -557,6 +555,8 @@ class DEAnalysis(object):
                 warnings.warn("NaNs detected during log expression transformation. Setting NaN values to zero.")
                 data = np.nan_to_num(data)
         r_matrix = rh.pydf_to_rmat(data)
+        r_matrix.rownames = robjects.StrVector(genes)
+        r_matrix.colnames = robjects.StrVector(self.labels)
         return r_matrix
 
     @staticmethod
@@ -589,7 +589,7 @@ class DEAnalysis(object):
         bayes_fit = limma.eBayes(contrast_fit)
         return bayes_fit
 
-    def _fit_contrast(self, contrasts, samples, data=None):
+    def _fit_contrast(self, contrasts, samples):
         """
         Fit the differential expression model using the supplied contrasts.
 
@@ -626,7 +626,77 @@ class DEAnalysis(object):
                                 fit_type=contrast['fit_type']) for name, contrast in contrast_dict.items()}
         return fits
 
-    def fit_contrasts(self, contrasts=None, names=None, fit_types=None, fit_defaults=True):
+    def _samples_in_contrast(self, contrast: str, split_str='-') -> list:
+        s = contrast.split(split_str)
+        samples = set(grepl(s[0], self.samples)).union(grepl(s[1], self.samples))
+        return samples
+
+    def _make_fit_dict(self, contrasts, fit_names=None, force_separate=False) -> dict:
+        """
+        Make a dictionary of fits to conduct
+        :param contrasts: 
+        :param fit_names: list; Names for each fit. Only used when contrasts are a list. If none are supplied, 
+        integers are used
+        :param force_separate: bool; Only used when contrasts are a list. If True, force individual contrast items to
+        be fit independently. 
+        :return: 
+        """
+
+        # List
+        if isinstance(contrasts, list):
+            '''
+            If it is a list, determine how many fits exist. If all items in the list aren't strings, then it is likely 
+            multiple contrasts for independent fits
+            '''
+            n_fits = 1
+            # Determine type of each item in list
+            contrast_types = np.array([type(c) for c in contrasts])
+            n_strings = sum(contrast_types == str)
+
+            '''
+            If not all of the list items are strings or user specifies to force separate, than each item will be a 
+            separate fit
+            '''
+            if (n_strings != len(contrasts)) | force_separate:
+                n_fits = len(contrasts)
+
+            # Make a list of names
+            if fit_names is None:
+                if n_fits > 1:
+                    names = [str(n) for n in range(n_fits)]
+                else:
+                    names = 0
+            else:
+                names = fit_names
+
+            if n_fits == 1:
+                fit_dict = {names: {'contrasts': contrasts,
+                                    'samples': set().union(*[self._samples_in_contrast(c) for c in contrasts]),
+                                    'fit_type': None}
+                            }
+            else:
+                fit_dict = {name: {'contrasts': contrast,
+                                   'samples': self._samples_in_contrast(contrast),
+                                   'fit_type': None}
+                            for name, contrast in zip(names, contrasts)
+                            }
+
+        # Str
+        elif isinstance(contrasts, str):
+            fit_dict = {contrasts: {'contrasts': contrasts,
+                                    'samples': self._samples_in_contrast(contrasts),
+                                    'fit_type': None}
+                        }
+        # Dict
+        elif isinstance(contrasts, dict):
+            fit_dict = contrasts
+
+        else:
+            raise TypeError('Contrasts must be supplied as str, list, or dict')
+
+        return fit_dict
+
+    def fit_contrasts(self, contrasts=None, fit_names=None, force_separate=False):
         """
         Wrapper to fit the differential expression model using the supplied contrasts.
 
@@ -641,41 +711,11 @@ class DEAnalysis(object):
         if self.data is None:
             raise ValueError('Please add data using set_data() before attempting to fit_contrasts.')
 
-        # Initialize full contrast dictionary
-        all_contrasts = self.default_contrasts if fit_defaults else {}
+        # If there are no user supplied contrasts use the defaults
+        if contrasts is None:
+            contrasts = self.default_contrasts
 
-        if contrasts is not None:
-            # Determine contrast type
-            n_fits = 1
-            if isinstance(contrasts, list):
-                n_strings = sum([isinstance(l, str) for l in contrasts])
-
-                # If all items in the list aren't strings, then it is likely multiple contrasts for independent fits
-                if n_strings != len(contrasts):
-                    n_fits = len(contrasts)
-
-            # Make a list of names
-            if names is None:
-                names = [str(n) for n in range(n_fits)]
-            elif isinstance(names, str):
-                names = [names]
-
-            if n_fits == 1:
-                user_contrasts = {names[0]: {'contrasts': contrasts, 'fit_type': None}}
-            else:
-                # Make nested contrast dictionary to match format expected of default contrasts
-                user_contrasts = {name: {'contrasts': contrast, 'fit_type': None} for name, contrast in zip(names, contrasts)}
-
-            # Check if there are clashes and warn of override
-            if isinstance(all_contrasts, list):
-                contrasts_to_fit = user_contrasts
-            else:
-                key_clash = [key for key in user_contrasts.keys() if key in all_contrasts.keys()]
-                if key_clash:
-                    warning = ("\nThe user contrasts: '%s' are in the default contrasts "
-                               "and will be overridden by the user values." % (','.join(key_clash)))
-                    warnings.warn(warning)
-                contrasts_to_fit = dict(all_contrasts, **user_contrasts)
+        contrasts_to_fit = self._make_fit_dict(contrasts, fit_names=fit_names, force_separate=force_separate)
 
         self.results = self._fit_dict(contrasts_to_fit)
 
