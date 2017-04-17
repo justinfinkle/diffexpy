@@ -163,14 +163,13 @@ class DEPlot(object):
         insig = df[~(df[y_colname] >= log10_pval) | ~(np.abs(df[x_colname]) >= log2_fc)]
 
         # Get maximum values for formatting latter
-        max_y = np.max(sig[y_colname])
+        max_y = np.ceil(np.max(sig[y_colname]))
         max_x = np.ceil(np.max(np.abs(sig[x_colname])))
 
         fig, ax = plt.subplots(**kwargs)
 
         # Split top data points if requested
         if top_n:
-
             # Find points to highlight
             sort = set()
             if isinstance(top_by, list):
