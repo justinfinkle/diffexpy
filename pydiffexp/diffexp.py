@@ -272,41 +272,79 @@ class DEAnalysis(object):
         self.db = None                      # type: pd.DataFrame
 
         if df is not None:
+            # Set the data
             self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels,
                            voom=voom)
-            if time is not None:
-                self.times = sorted(map(int_or_float, list(set(self.experiment_summary[time]))))
-                if len(self.times) > 1:
-                    self.timeseries = True
+
+            # Determine if data is timeseries
+            self.times, self.timeseries = self._is_timeseries(time_var=time)
+            print(self.times, self.timeseries)
+            sys.exit()
+
+            # Determine conditions and replicates of experiment
             self.conditions = sorted(list(set(self.experiment_summary[condition])))
-            self.default_contrasts = self.possible_contrasts()
             self.replicates = sorted(list(set(self.experiment_summary[replicate])))
 
+            # Set default contrasts
+            self.default_contrasts = self.possible_contrasts()
+
     def _set_data(self, df, index_names=None, split_str='_', reference_labels=None, voom=False):
+        """
+        Set the data for the DEAnalysis object
+        :param df: DataFrame; 
+        :param index_names: list-like;
+        :param split_str: string;
+        :param reference_labels: list-like;
+        :param voom: bool; Voom the data for fitting. True if using counts data from RNA-seq. False if using microarray
+        :return: 
+        """
         # Check for a multiindex or try making one
         multiindex = mi.is_multiindex(df)
         h_df = None
         if sum(multiindex) == 0:
-            h_df = mi.make_hierarchical(df, index_names=index_names, split_str=split_str)
+            h_df = mi.make_multiindex(df, index_names=index_names, split_str=split_str)
         else:
             if multiindex[1]:
                 h_df = df.copy()
             elif multiindex[0] and not multiindex[1]:  # Second part is probably redundant
                 h_df = df.T
-                warnings.warn('DataFrame transposed so multiindex is along columns.')
+                warnings.warn('DataFrame transposed. Multiindex is along columns.')
 
             # Double check multiindex
             multiindex = mi.is_multiindex(h_df)
             if sum(multiindex) == 0:
-                raise ValueError('No valid multiindex was found, and once could not be created')
+                raise ValueError('No valid multiindex was found, and one could not be created')
 
+        # Sort multiindex
         h_df.sort_index(axis=1, inplace=True)
         self.data = h_df
-        # Sort multiindex
 
+        # Summarize the data and make data objects for R
         self.experiment_summary = self.get_experiment_summary(reference_labels=reference_labels)
         self.design = self._make_model_matrix()
         self.data_matrix = self._make_data_matrix(voom=voom)
+
+    def _is_timeseries(self, time_var=None):
+        """
+        Decide if data is timeseries or not. If it is, return the unique times
+        :param time_var: str; Column name of the time variable
+        :return: 
+        """
+        times = []
+        is_timeseries = False
+
+        # Future autodetect - find timevariable
+        # print(grepl('TIME', self.experiment_summary.columns.str.upper()))
+
+        if time_var is not None:
+            # Get unique values of times
+            times = sorted(map(int_or_float, list(set(self.experiment_summary[time_var]))))
+
+            # If there is more than one time value, dataset is a timeseries
+            if len(times) > 1:
+                is_timeseries = True
+
+        return times, is_timeseries
 
     def get_experiment_summary(self, reference_labels=None):
         """
@@ -575,7 +613,7 @@ class DEAnalysis(object):
 
         return fit
 
-    def _fit_dict(self, contrast_dict: dict) -> Dict[str, DEResults]:
+    def _fit_dict(self, contrast_dict) -> Dict[str, DEResults]:
         """
         Make the fits into a dictionary. This is wrapped into a function for type hinting
         :param self:
@@ -622,18 +660,24 @@ class DEAnalysis(object):
             elif isinstance(names, str):
                 names = [names]
 
-            # Make nested contrast dictionary to match format expected of default contrasts
-            user_contrasts = {name: {'contrasts': contrast, 'fit_type': None} for name, contrast in zip(names, contrasts)}
+            if n_fits == 1:
+                user_contrasts = {names[0]: {'contrasts': contrasts, 'fit_type': None}}
+            else:
+                # Make nested contrast dictionary to match format expected of default contrasts
+                user_contrasts = {name: {'contrasts': contrast, 'fit_type': None} for name, contrast in zip(names, contrasts)}
 
             # Check if there are clashes and warn of override
-            key_clash = [key for key in user_contrasts.keys() if key in all_contrasts.keys()]
-            if key_clash:
-                warning = ("\nThe user contrasts: '%s' are in the default contrasts "
-                           "and will be overridden by the user values." % (','.join(key_clash)))
-                warnings.warn(warning)
-            all_contrasts = dict(all_contrasts, **user_contrasts)
+            if isinstance(all_contrasts, list):
+                contrasts_to_fit = user_contrasts
+            else:
+                key_clash = [key for key in user_contrasts.keys() if key in all_contrasts.keys()]
+                if key_clash:
+                    warning = ("\nThe user contrasts: '%s' are in the default contrasts "
+                               "and will be overridden by the user values." % (','.join(key_clash)))
+                    warnings.warn(warning)
+                contrasts_to_fit = dict(all_contrasts, **user_contrasts)
 
-        self.results = self._fit_dict(all_contrasts)
+        self.results = self._fit_dict(contrasts_to_fit)
 
         # Add/Update Results dictionary
         self.contrast_dict = self.match_contrasts()
