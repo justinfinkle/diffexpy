@@ -1,12 +1,13 @@
 import sys, inspect, warnings
 import itertools
 import pandas as pd
-import seaborn.apionly as sns
+import seaborn.apionly as sns_api
 import numpy as np
 from scipy import stats
 from collections import Counter
 from cycler import cycler
 from sklearn.decomposition import PCA
+from sklearn.metrics import pairwise_distances
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import matplotlib.patches as patches
@@ -216,16 +217,36 @@ class DEPlot(object):
         ax.set_ylabel(r'$-log_{10}$(corrected p-value)')
         return ax
 
-    def add_ts(self, ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None, ci=0.83, fill=True, scatter=True):
-        gene = data.name
-        data = data.reset_index()
-        grouped_data = data.groupby(subgroup)
-
+    @staticmethod
+    def tsstats(gene, data, groupby, ci, group=None):
+        grouped = data.groupby(groupby)
+        group = group if group is not None else 'group'
         # Get plotting statistics. Rows are: group, mean, SE, and Tstat
         #todo: Use groupby more appropriately to get stats
         grouped_stats = np.array(
             [[g, np.mean(data[gene]), stats.sem(data[gene]), stats.t.ppf(1 - (1 - ci) / 2, df=len(data) - 1)]
-             for g, data in grouped_data]).T
+             for g, data in grouped]).T
+        grouped_df = pd.DataFrame(grouped_stats, index=[group, 'mean', 'se', 'tstat']).T
+        return grouped_df
+
+    @staticmethod
+    def confidence_interval_lines(mean, se, tstat):
+        """
+        
+        :param mean: array 
+        :param se: array
+        :param tstat: array
+        :param ci: float 0-1
+        :return: 
+        """
+        upper = mean + se * tstat
+        lower = mean - se * tstat
+        return upper, lower
+
+    def add_ts(self, ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None, ci=0.83, fill=True, scatter=True):
+        gene = data.name
+        data = data.reset_index()
+        grouped_stats = self.tsstats(gene, data, groupby=subgroup, ci=ci, group=subgroup)
 
         if mean_line_dict is None:
             mean_line_dict = dict()
@@ -233,7 +254,7 @@ class DEPlot(object):
             fill_dict = dict()
         mean_defaults = dict(ls='-', marker='s', lw=2, mew=0, label=(name + " mean"), ms=10, zorder=0)
         mean_kwargs = dict(mean_defaults, **mean_line_dict)
-        mean_line, = ax.plot(grouped_stats[0], grouped_stats[1], **mean_kwargs)
+        mean_line, = ax.plot(grouped_stats[subgroup], grouped_stats['mean'], **mean_kwargs)
         mean_color = mean_line.get_color()
 
         if scatter:
@@ -242,10 +263,10 @@ class DEPlot(object):
         if fill:
             fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.2, label=(name + (' {:d}%CI'.format(int(ci * 100)))))
             fill_kwargs = dict(fill_defaults, **fill_dict)
-            ax.fill_between(grouped_stats[0], grouped_stats[1] - grouped_stats[2] * grouped_stats[3],
-                            grouped_stats[1] + grouped_stats[2] * grouped_stats[3], **fill_kwargs)
+            ci_lines = self.confidence_interval_lines(grouped_stats['mean'], grouped_stats['se'], grouped_stats['tstat'])
+            ax.fill_between(grouped_stats[subgroup], ci_lines[0], ci_lines[1], **fill_kwargs)
 
-    def tsplot(self, df, supergroup='condition', subgroup='time', **kwargs):
+    def tsplot(self, df, legend=True, supergroup='condition', subgroup='time', **kwargs):
         gene = df.name
         supers = sorted(list(set(df.index.get_level_values(supergroup))))
         fig, ax = plt.subplots()
@@ -254,7 +275,8 @@ class DEPlot(object):
             sup_data = df.loc[sup]
             self.add_ts(ax, sup_data, sup, subgroup=subgroup, **kwargs)
         # ax.set_xlim([np.min(grouped_stats[0]), np.max(grouped_stats[0])])
-        ax.legend(loc='best', numpoints=1)
+        if legend:
+            ax.legend(loc='best', numpoints=1)
         # ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda x, p: '{:,.0f}'.format(x)))
         ax.set_xlabel(subgroup.title())
         ax.set_ylabel('Expression')
@@ -263,12 +285,32 @@ class DEPlot(object):
 
     def heatmap(self):
         der = self.dea.results['KO-WT']
-        cmap = sns.diverging_palette(30, 260, s=80, l=55, as_cmap=True)
+        cmap = sns_api.diverging_palette(30, 260, s=80, l=55, as_cmap=True)
         # np.random.seed(8)
         # idx = np.random.randint(0, len(self.dea.results['KO-WT'].top_table(p=0.05)), size=100)
-        df = der.top_table(p=0.05)
-        df = pd.concat([df, der.discrete_clusters.loc[df.index]], axis=1)
+        df = der.top_table(p=0.001)
+        clusters = der.cluster_discrete(der.decide_tests(p_value=0.05)).loc[df.index]
+        df = pd.concat([df, clusters], axis=1)   # type: pd.DataFrame
         df.sort_values(['Cluster', 'adj_pval', 'AveExpr'], inplace=True, ascending=[True, True, False])
+        feedback_lost = df[(df.Cluster=='(0, 0, 0, 1, 1)') | (df.Cluster=='(0, 0, 1, 1, 1)') |
+                           (df.Cluster=='(0, 1, 1, 1, 1)') ].sort_values('adj_pval')
+
+        print(feedback_lost)
+        print(feedback_lost.shape)
+        for g in feedback_lost.index:
+            print(g)
+            # self.tsplot(self.dea.data.loc[g])
+            # plt.show()
+        sys.exit()
+        c_groups = df.groupby('Cluster')
+        for c, group in c_groups:
+            for g in group.index:
+                print(g)
+            print(c, len(group))
+            print('\n', '\n')
+            input()
+            print('got it')
+        sys.exit()
         # print(df)
         # sys.exit()
         # df = df.loc[self.dea.results['KO-WT'].discrete_clusters.loc[df.index].sort_values('Cluster').index]
@@ -276,7 +318,7 @@ class DEPlot(object):
         hm_data = np.abs(der.discrete.loc[df.index].values)*hm_data
         hm_data = hm_data[~(hm_data == 0).all(axis=1)]
         hm_data.columns = [0, 15, 60, 120, 240]
-        g = sns.clustermap(hm_data, cmap=cmap, col_cluster=False, row_cluster=False, figsize=(5, 10))
+        g = sns_api.clustermap(hm_data, cmap=cmap, col_cluster=False, row_cluster=False, figsize=(5, 10))
         plt.setp(g.ax_heatmap.yaxis.get_majorticklabels(), rotation=0)
         g.ax_heatmap.yaxis.set_visible(False)
         plt.show()
