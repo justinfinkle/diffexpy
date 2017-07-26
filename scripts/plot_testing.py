@@ -13,8 +13,13 @@ dea = read_dea_pickle("./sprouty_pickle.pkl")
 
 # Initialize a plotting object
 dep = DEPlot(dea)
+#
+# dep.tsplot(dea.data.loc['SPRY2'])
+# plt.tight_layout()
+# plt.show()
 
 dep.heatmap()
+plt.show()
 
 
 sys.exit()
