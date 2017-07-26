@@ -8,8 +8,8 @@ import rpy2.robjects.numpy2ri
 from scipy.stats import zscore
 from rpy2.robjects.packages import importr
 from pydiffexp.utils.utils import int_or_float, grepl
-import pydiffexp.utils.multiindex_helpers as mi
-import pydiffexp.utils.rpy2_helpers as rh
+from pydiffexp.utils import multiindex_helpers as mi
+from pydiffexp.utils import rpy2_helpers as rh
 from natsort import natsorted
 import matplotlib.pyplot as plt
 
@@ -240,7 +240,7 @@ class DEAnalysis(object):
     """
 
     def __init__(self, df=None, index_names=None, split_str='_', time='time', condition='condition',
-                 replicate='replicate', reference_labels=None, voom=False):
+                 replicate='replicate', reference_labels=None, voom=False, log2=True):
         """
 
         :param df:
@@ -274,7 +274,7 @@ class DEAnalysis(object):
         if df is not None:
             # Set the data
             self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels,
-                           voom=voom)
+                           voom=voom, log2=log2)
 
             # Determine if data is timeseries
             self.times, self.timeseries = self._is_timeseries(time_var=time)
@@ -286,7 +286,7 @@ class DEAnalysis(object):
             # Set default contrasts
             self.default_contrasts = self.possible_contrasts()
 
-    def _set_data(self, df, index_names=None, split_str='_', reference_labels=None, voom=False):
+    def _set_data(self, df, index_names=None, split_str='_', reference_labels=None, voom=False, log2=True):
         """
         Set the data for the DEAnalysis object
         :param df: DataFrame; 
@@ -320,7 +320,7 @@ class DEAnalysis(object):
         # Summarize the data and make data objects for R
         self.experiment_summary = self.get_experiment_summary(reference_labels=reference_labels)
         self.design = self._make_model_matrix()
-        self.data_matrix = self._make_data_matrix(voom=voom)
+        self.data_matrix = self._make_data_matrix(voom=voom, log2=log2)
 
     def _is_timeseries(self, time_var=None):
         """
@@ -535,7 +535,7 @@ class DEAnalysis(object):
         design.colnames = robjects.StrVector(str_set)
         return design
 
-    def _make_data_matrix(self, voom):
+    def _make_data_matrix(self, voom, log2=True):
         """
         Make the data matrix as an R object
         :return:
@@ -554,8 +554,10 @@ class DEAnalysis(object):
             data = voom_results['E']
         else:
             # Log transform expression and correct values if needed
-            data = np.log2(self.data)
-            # data = self.data.values
+            if log2:
+                data = np.log2(self.data)
+            else:
+                data = self.data
             if np.sum(np.isnan(data.values)) > 0:
                 warnings.warn("NaNs detected during log expression transformation. Setting NaN values to zero.")
                 data = np.nan_to_num(data)
