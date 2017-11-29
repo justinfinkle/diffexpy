@@ -1,7 +1,7 @@
 import sys, inspect, warnings
 import itertools
 import pandas as pd
-import seaborn.apionly as sns_api
+import seaborn as sns
 import numpy as np
 from scipy import stats
 from collections import Counter
@@ -266,10 +266,11 @@ class DEPlot(object):
             ci_lines = self.confidence_interval_lines(grouped_stats['mean'], grouped_stats['se'], grouped_stats['tstat'])
             ax.fill_between(grouped_stats[subgroup], ci_lines[0], ci_lines[1], **fill_kwargs)
 
-    def tsplot(self, df, legend=True, supergroup='condition', subgroup='time', **kwargs):
+    def tsplot(self, df, ax=None, legend=True, supergroup='condition', subgroup='time', **kwargs):
         gene = df.name
         supers = sorted(list(set(df.index.get_level_values(supergroup))))
-        fig, ax = plt.subplots()
+        if not ax:
+            fig, ax = plt.subplots(figsize=(8,6))
         ax.set_prop_cycle(cycler('color', _colors))
         for sup in supers:
             sup_data = df.loc[sup]
@@ -285,43 +286,46 @@ class DEPlot(object):
 
     def heatmap(self):
         der = self.dea.results['KO-WT']
-        cmap = sns_api.diverging_palette(30, 260, s=80, l=55, as_cmap=True)
+        cmap = sns.diverging_palette(30, 260, s=80, l=55, as_cmap=True)
         # np.random.seed(8)
         # idx = np.random.randint(0, len(self.dea.results['KO-WT'].top_table(p=0.05)), size=100)
-        df = der.top_table(p=0.001)
+        df = der.top_table(p=0.05)
         clusters = der.cluster_discrete(der.decide_tests(p_value=0.05)).loc[df.index]
         df = pd.concat([df, clusters], axis=1)   # type: pd.DataFrame
         df.sort_values(['Cluster', 'adj_pval', 'AveExpr'], inplace=True, ascending=[True, True, False])
         feedback_lost = df[(df.Cluster=='(0, 0, 0, 1, 1)') | (df.Cluster=='(0, 0, 1, 1, 1)') |
                            (df.Cluster=='(0, 1, 1, 1, 1)') ].sort_values('adj_pval')
 
-        print(feedback_lost)
-        print(feedback_lost.shape)
-        for g in feedback_lost.index:
-            print(g)
-            # self.tsplot(self.dea.data.loc[g])
-            # plt.show()
-        sys.exit()
-        c_groups = df.groupby('Cluster')
-        for c, group in c_groups:
-            for g in group.index:
-                print(g)
-            print(c, len(group))
-            print('\n', '\n')
-            input()
-            print('got it')
-        sys.exit()
-        # print(df)
+        # print(feedback_lost)
+        # print(feedback_lost.shape)
+        # for g in feedback_lost.index:
+        #     print(g)
+        #     # self.tsplot(self.dea.data.loc[g])
+        #     # plt.show()
         # sys.exit()
-        # df = df.loc[self.dea.results['KO-WT'].discrete_clusters.loc[df.index].sort_values('Cluster').index]
+        # c_groups = df.groupby('Cluster')
+        # for c, group in c_groups:
+        #     for g in group.index:
+        #         print(g)
+        #     print(c, len(group))
+        #     print('\n', '\n')
+        #     input()
+        #     print('got it')
+        # sys.exit()
+        # # print(df)
+        # # sys.exit()
+        df = df.loc[self.dea.results['KO-WT'].discrete_clusters.loc[df.index].sort_values('Cluster').index]
         hm_data = df.iloc[:, :5]
         hm_data = np.abs(der.discrete.loc[df.index].values)*hm_data
-        hm_data = hm_data[~(hm_data == 0).all(axis=1)]
+        hm_data = hm_data[~(hm_data == 0).all(axis=1)].iloc[::-1]
+        hm_data = (hm_data.divide(np.max(np.abs(hm_data), axis=1), axis=0))
+        # hm_data = hm_data.apply(stats.zscore, axis=1, ddof=1)
+
         hm_data.columns = [0, 15, 60, 120, 240]
-        g = sns_api.clustermap(hm_data, cmap=cmap, col_cluster=False, row_cluster=False, figsize=(5, 10))
+        zeros = hm_data.values == 0
+        g = sns.clustermap(hm_data, cmap=cmap, col_cluster=False, row_cluster=False, figsize=(5, 10))#, mask=zeros)
         plt.setp(g.ax_heatmap.yaxis.get_majorticklabels(), rotation=0)
         g.ax_heatmap.yaxis.set_visible(False)
-        plt.show()
 
 
     def make_path_dict(self, condition, max_sw, min_sw=0.0, path='all', dc_df=None, genes=None, norm=None):

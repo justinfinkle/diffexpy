@@ -19,9 +19,10 @@ dep = DEPlot(dea)
 # plt.show()
 
 dep.heatmap()
-plt.show()
-
-
+plt.savefig('/Users/jfinkle/Dropbox/Justin Finkle, shared/Media/Sprouty/images/row_max_normalized_heatmap.png', fmt='png',
+            dpi=600)
+#
+#
 sys.exit()
 
 # Volcano Plot
@@ -29,10 +30,11 @@ x = dea.results['KO-WT'].top_table(coef=1, use_fstat=False)
 # dep.volcano_plot(x, top_n=5, show_labels=True)
 
 # Time Series Plot
-x = dea.data.loc['CISH']
+x = dea.data.loc['IVL']
 
-# dep.tsplot(x)
-
+dep.tsplot(x)
+plt.show()
+sys.exit()
 x = dea.results['KO_ts-WT_ts']
 y = dea.results['KO-WT']
 

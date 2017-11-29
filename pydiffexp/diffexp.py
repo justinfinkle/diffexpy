@@ -130,15 +130,21 @@ class DEResults(MArrayLM):
         del counts[zeros]
 
         cluster_count = pd.DataFrame.from_dict(counts, orient='index')
-        cluster_count.columns = ['Count']
 
-        # Calculate difference from expectation of evenly distributed bins
-        expected_clusters = 3 ** n_timepoints
-        num_clusters = len(counts)
-        n_genes = sum(counts.values())
-        expected_per_cluster = round(n_genes/expected_clusters)
+        # There may not be any clusters
+        try:
+            cluster_count.columns = ['Count']
 
-        cluster_count['Diff from Expectation'] = np.abs(cluster_count['Count']-expected_per_cluster)
+            # Calculate difference from expectation of evenly distributed bins
+            expected_clusters = 3 ** n_timepoints
+            num_clusters = len(counts)
+            n_genes = sum(counts.values())
+            expected_per_cluster = round(n_genes/expected_clusters)
+
+            cluster_count['Diff from Expectation'] = np.abs(cluster_count['Count']-expected_per_cluster)
+        except ValueError:
+            # Return the empty dataframe
+            pass
 
         return cluster_count
 
