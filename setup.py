@@ -13,5 +13,7 @@ setup(
         'numpy',
         'pandas',
         'palettable',
+        'natsort',
+        'matplotlib'
     ]
 )
