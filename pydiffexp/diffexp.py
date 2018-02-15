@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 rpy2.robjects.numpy2ri.activate()
 
 # Load R packages
-limma = importr('limma2')
+limma = importr('limma')
 stats = importr('stats')
 
 # Set null variable
