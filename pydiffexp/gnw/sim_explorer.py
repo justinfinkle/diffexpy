@@ -28,7 +28,7 @@ def degree_info(dg) -> pd.DataFrame:
     return info
 
 
-def to_gephi(df: pd.DataFrame, out_path, positive_token="+"):
+def to_gephi(df: pd.DataFrame, out_path=None, positive_token="+"):
     """
     Save an edge list in a gephi compatible format
     :param df:
@@ -37,13 +37,15 @@ def to_gephi(df: pd.DataFrame, out_path, positive_token="+"):
     :return:
     """
     tmp = df.copy()                         # type: pd.DataFrame
-    # Set positive edges
-    tmp[tmp.Sign == positive_token] = 1
-
     # Set negative edges
-    tmp[tmp.Sign != positive_token] = -1
-    tmp.to_csv(out_path, index=False)
-    return
+    tmp.Sign[tmp.Sign != positive_token] = -1
+
+    # Set positive edges
+    tmp.Sign[tmp.Sign == positive_token] = 1
+
+    if out_path:
+        tmp.to_csv(out_path, index=False)
+    return tmp
 
 
 def make_perturbations(target, node_list, reps=3):
