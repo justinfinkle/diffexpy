@@ -1,17 +1,10 @@
-import sys
 import os
-import shutil
 import pandas as pd
-import numpy as np
 import networkx as nx
 import time
-from GNWwrapper import GnwNetwork, module_logic_combos, mk_ch_dir
-from scipy import stats
-import matplotlib.pyplot as plt
+from gnw.GnwWrapper import GnwNetwork, mk_ch_dir
 import operator
 import functools
-from nxpd import draw
-import networkx.algorithms.isomorphism as iso
 
 
 def count_combos(dg):
