@@ -4,3 +4,4 @@
 /dist/
 *.pyc
 ipynb/.ipynb_checkpoints
+*checkpoint.ipynb
