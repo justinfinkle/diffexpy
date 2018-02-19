@@ -7,13 +7,14 @@ setup(
     license='GPL3',
     author='Justin Finkle',
     author_email='jfinkle@u.northwestern.edu',
-    description='Differential Expression Analysis in Python',
+    description='Dynamic Differential Expression Analysis in Python',
     install_requires=[
         'rpy2',
         'numpy',
         'pandas',
         'palettable',
         'natsort',
-        'matplotlib'
+        'matplotlib',
+        'networkx'
     ]
 )
