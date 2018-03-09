@@ -1,11 +1,7 @@
-import pandas as pd
-import numpy as np
-from pydiffexp import DEAnalysis, DEPlot
-import pydiffexp.utils.rpy2_helpers as rh
-from pydiffexp.utils import utils
-import matplotlib.pyplot as plt
-import seaborn as sns
 import sys
+
+import pandas as pd
+from pydiffexp import DEAnalysis, DEPlot
 
 pd.set_option('display.width', 1000)
 

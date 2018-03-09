@@ -1,7 +1,8 @@
-import warnings, sys
-import pandas as pd
+import sys
+import warnings
+
 import numpy as np
-import matplotlib.pyplot as plt
+import pandas as pd
 
 
 def parse_title(title, split_str=" "):
@@ -56,7 +57,9 @@ if __name__ == '__main__':
 
     # Select only the RA data and quantile normalize it. Log2 tranform will happen in pydiffexp pipeline
     idx = pd.IndexSlice
-    mRNA = data.loc[:, idx[:, :, 'RA', :, :]]
+    mRNA = data.loc[:, idx[:, :, 'TR', :, :]]
+    mRNA.to_pickle("../data/GSE13100/bgcorrected_GSE13100_TR_data.pkl")
+    sys.exit()
 
     # Plot the distributions of the RA abundance
     info_idx = mi_to_array(mRNA.columns)
@@ -70,5 +73,5 @@ if __name__ == '__main__':
     plt.show()
 
     # Pickle Data
-    mRNA.to_pickle('../data/GSE13100/log2_bgcorrected_GSE13100_RA_data.pkl')
+    mRNA.to_pickle('../data/GSE13100/log2_bgcorrected_GSE13100_TR_data.pkl')
 

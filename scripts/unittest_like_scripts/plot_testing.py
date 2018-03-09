@@ -1,10 +1,9 @@
 import sys
-import pandas as pd
-from pydiffexp.utils.io import read_dea_pickle
-import numpy as np
-from pydiffexp.utils.utils import column_unique
-from pydiffexp import DEPlot
+
 import matplotlib.pyplot as plt
+import pandas as pd
+from pydiffexp import DEPlot
+from pydiffexp.utils.io import read_dea_pickle
 
 pd.set_option('display.width', 1000)
 

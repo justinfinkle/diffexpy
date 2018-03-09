@@ -1,17 +1,19 @@
-import os, sys, warnings, itertools
-from typing import Dict
+import itertools
+import os
+import sys
+import warnings
 from collections import Counter
+from typing import Dict
+
 import numpy as np
 import pandas as pd
 import rpy2.robjects as robjects
 import rpy2.robjects.numpy2ri
-from scipy.stats import zscore
-from rpy2.robjects.packages import importr
-from pydiffexp.utils.utils import int_or_float, grepl
+from natsort import natsorted
 from pydiffexp.utils import multiindex_helpers as mi
 from pydiffexp.utils import rpy2_helpers as rh
-from natsort import natsorted
-import matplotlib.pyplot as plt
+from pydiffexp.utils.utils import int_or_float, grepl
+from rpy2.robjects.packages import importr
 
 # Activate conversion
 rpy2.robjects.numpy2ri.activate()
@@ -22,6 +24,51 @@ stats = importr('stats')
 
 # Set null variable
 null = robjects.r("NULL")
+
+
+def cluster_to_array(cluster: str):
+    """
+    Converts a string of DE cluster values to an integer array
+    :param cluster: str: expected form (int, int, int,...)
+    :return:
+    """
+    return np.array([int(s) for s in cluster.strip('())').split(',')])
+
+
+def get_scores(grouped_df, de_df, weighted_df):
+    """
+    Score how well each trajectory fits the assigned cluster
+    :param grouped_df: pandas grouped dataframe
+    :param de_df: differential expression dataframe
+    :param weighted_df: weighted dataframe
+    :return: df
+    """
+    scores = pd.DataFrame(grouped_df.apply(group_scores, de_df, weighted_df))
+    if 'gene' not in scores.index.names:
+        scores.index.set_names('gene', level=1, inplace=True)
+    scores = scores.reset_index().sort_values(['Cluster', 'score'], ascending=[False, False]).set_index('gene')
+    scores.fillna(0, inplace=True)
+    return scores
+
+
+def group_scores(cluster, de_df, gene_info):
+    """
+    Score how well each trajectory matches the cluster
+    :param cluster:
+    :param de_df:
+    :param gene_info:
+    :return: series
+    """
+    # Get the scores for each trajectory based on the assumed cluster
+    expected = cluster_to_array(cluster.name)
+    clus_lfc = gene_info.loc[cluster.index]
+    penalty = -np.abs(np.sign(clus_lfc).values - expected)
+    scores = np.abs(clus_lfc).values * penalty + np.abs(clus_lfc).values * (penalty == 0)  # type: np.ndarray
+
+    # Calculate fraction of the lfc that was retained
+    score_frac = np.sum(scores, axis=1)/np.sum(np.abs(de_df.loc[cluster.index]).values, axis=1)
+
+    return pd.Series(data=score_frac, index=cluster.index, name='score')
 
 
 class MArrayLM(object):
@@ -239,6 +286,14 @@ class DEResults(MArrayLM):
         df = rh.rvect_to_py(decide).astype(int)
         return df
 
+    def score_clustering(self):
+        weighted_lfc = (1 - self.p_value) * self.continuous.loc[self.p_value.index, self.p_value.columns]
+        grouped = self.cluster_discrete(self.decide_tests(p_value=0.05)).groupby('Cluster')
+        scores = get_scores(grouped, self.continuous.loc[:, self.p_value.columns], weighted_lfc).sort_index()
+        scores['score'] = scores['score']*(1-self.continuous['adj_pval']).sort_index().values
+        scores.sort_values('score', ascending=False, inplace=True)
+        return scores
+
 
 class DEAnalysis(object):
     """
@@ -276,6 +331,7 @@ class DEAnalysis(object):
         self.contrast_dict = {}             # type: dict
         self.decide = None                  # type: pd.DataFrame
         self.db = None                      # type: pd.DataFrame
+        self.log2 = log2                    # type: bool
 
         if df is not None:
             # Set the data
@@ -552,11 +608,13 @@ class DEAnalysis(object):
         if voom:
             r_data = rh.pydf_to_rmat(self.data)
             voom_results = rh.unpack_r_listvector(limma.voom(r_data, save_plot=True))
-            print(voom_results['voom_xy'])
-            plt.plot(voom_results['voom_xy']['x'], voom_results['voom_xy']['y'], '.')
-            plt.plot(voom_results['voom_line']['x'], voom_results['voom_line']['y'])
-            plt.show()
-            sys.exit()
+
+            # Plot voom results
+            # print(voom_results['voom_xy'])
+            # plt.plot(voom_results['voom_xy']['x'], voom_results['voom_xy']['y'], '.')
+            # plt.plot(voom_results['voom_line']['x'], voom_results['voom_line']['y'])
+            # plt.show()
+            # sys.exit()
             data = voom_results['E']
         else:
             # Log transform expression and correct values if needed

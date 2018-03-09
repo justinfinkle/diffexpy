@@ -1,17 +1,17 @@
-import os
-import sys
 import copy
+import itertools as it
+import os
 import random
 import subprocess
 import warnings
 import xml.etree.ElementTree as eT
-import itertools as it
-import pandas as pd
-import numpy as np
+from typing import Union, Dict
+
 import networkx as nx
+import numpy as np
+import pandas as pd
 from nxpd import draw
 from scipy import stats
-from typing import Union, Dict
 
 # The namespace needs to be registered before a tree is parsed otherwise it adds ns0
 eT.register_namespace('', "http://www.sbml.org/sbml/level2")

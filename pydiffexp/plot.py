@@ -1,20 +1,20 @@
-import sys, inspect, warnings
 import itertools
-import pandas as pd
-import seaborn as sns
-import numpy as np
-from scipy import stats
+import warnings
 from collections import Counter
-from cycler import cycler
-from sklearn.decomposition import PCA
-from sklearn.metrics import pairwise_distances
-import matplotlib.pyplot as plt
+
 import matplotlib as mpl
 import matplotlib.patches as patches
-from matplotlib.path import Path
+import matplotlib.pyplot as plt
+import numpy as np
 import palettable.colorbrewer as cbrewer
+import pandas as pd
+import seaborn as sns
+from cycler import cycler
+from matplotlib.path import Path
+from pydiffexp import DEAnalysis
+from scipy import stats
 
-from pydiffexp import DEResults, DEAnalysis
+sns.set_style("white")
 
 # Set plot defaults
 mpl.rcParams['pdf.fonttype'] = 42
@@ -275,7 +275,7 @@ class DEPlot(object):
         for sup in supers:
             sup_data = df.loc[sup]
             self.add_ts(ax, sup_data, sup, subgroup=subgroup, **kwargs)
-        # ax.set_xlim([np.min(grouped_stats[0]), np.max(grouped_stats[0])])
+        # ax.set_xlim([np.min(grouped_stats[0]), np.max(grouped_stats[0])])\
         if legend:
             ax.legend(loc='best', numpoints=1)
         # ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda x, p: '{:,.0f}'.format(x)))

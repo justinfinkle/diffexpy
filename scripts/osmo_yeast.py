@@ -1,11 +1,9 @@
-import sys
 import pandas as pd
-from pydiffexp import DEAnalysis, DEPlot
-import matplotlib.pyplot as plt
+from pydiffexp import DEAnalysis
 
 # Load the data
 data_path = "/Volumes/Hephaestus/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/GSE13100/" \
-            "log2_bgcorrected_GSE13100_RA_data.pkl"
+            "bgcorrected_GSE13100_TR_data.pkl"
 raw_data = pd.read_pickle(data_path)
 
 # The example data has been background corrected, so set everything below 0 to a trivial positive value of 1
@@ -20,9 +18,4 @@ dea = DEAnalysis(raw_data, replicate='rep', reference_labels=['condition', 'time
 
 # Fit the contrasts and save the object
 dea.fit_contrasts()
-# print(dea.results['MUT-WT'].top_table(p=0.05))
-
-dep = DEPlot(dea)
-x = dea.results['MUT-WT'].top_table(coef=7, use_fstat=False)
-dep.volcano_plot(x, top_n=5, show_labels=True)
-plt.show()
+dea.to_pickle('intermediate_data/yeast_osmoTR_dea.pkl')
