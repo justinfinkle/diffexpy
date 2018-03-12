@@ -1,6 +1,6 @@
-import pandas as pd
 import networkx as nx
 import numpy as np
+import pandas as pd
 
 
 def tsv_to_dg(path):
@@ -9,8 +9,8 @@ def tsv_to_dg(path):
     :param path:
     :return:
     """
-    df = pd.read_csv(path, sep='\t', header=None, names=['Source', 'Target', 'Sign'])
-    dg = nx.from_pandas_dataframe(df, source='Source', target='Target', create_using=nx.DiGraph())
+    df = pd.read_csv(path, sep='\t', header=None, names=['Source', 'Target', 'Sign'])               # type: pd.DataFrame
+    dg = nx.from_pandas_dataframe(df, source='Source', target='Target', create_using=nx.DiGraph())  # type: nx.DiGraph
     return df, dg
 
 

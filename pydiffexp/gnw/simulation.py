@@ -621,6 +621,48 @@ class SBMLTree(eT.ElementTree):
             raise ValueError('No SBML loaded') from e
         return new_tree
 
+    def make_ki_sbml(self, node):
+        """
+        Make a knockin version of the dynamical model. Remove any regulatores of the target node synthesis reaction
+
+        Note: this is extremely dependent on the structure of the SBML (XML).
+        :param node: str; node to knockout
+        :return:
+        """
+        new_tree = self.copy()
+        try:
+            target_reaction = node + '_synthesis'
+            for v in new_tree.iterfind("*//*[@id='{}']".format(target_reaction)):
+                v.set('name', "{}: no inputs".format(target_reaction))
+
+                # Remove list of modifiers
+                mods = [c for c in v.iter() if 'listOfModifiers' in c.tag][0]
+                v.remove(mods)
+
+                # Modify kinetics
+                param_list = [c for c in v.iter() if 'kineticLaw' in c.tag][0][0]
+                delete_list = []
+                for param in param_list:
+                    # Make list of elements to delete
+                    name = param.get('name')
+                    if "bindsAs" in name or "numAct" in name or "numDeact" in name or "k_" in name or "n_" in name:
+                        delete_list.append(param)
+                    elif "a_" in name:
+                        # Set the only alpha parameter
+                        if name == 'a_0':
+                            param.set('value', "1.0")
+                        # Other alphas will be deleted
+                        else:
+                            delete_list.append(param)
+
+                # Delete elements
+                for d in delete_list:
+                    param_list.remove(d)
+
+        except AttributeError as e:
+            raise ValueError('No SBML loaded') from e
+        return new_tree
+
     def copy(self):
         return SBMLTree(copy.deepcopy(self.root), self.net_df.copy())
 
