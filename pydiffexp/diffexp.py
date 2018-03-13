@@ -43,7 +43,20 @@ def get_scores(grouped_df, de_df, weighted_df):
     :param weighted_df: weighted dataframe
     :return: df
     """
-    scores = pd.DataFrame(grouped_df.apply(group_scores, de_df, weighted_df))
+    # If there is only one group it needs to be setup differently
+    if len(grouped_df.groups.keys()) == 1:
+        # Extract group as a dataframe
+        single_cluster = list(grouped_df.groups.keys())[0]
+        g = grouped_df.get_group(single_cluster)
+        g.name = single_cluster
+        scores = group_scores(g, de_df, weighted_df)
+
+        # Format to match expected output of apply
+        scores = scores.reset_index()
+        scores.insert(0, 'Cluster', single_cluster)
+        scores.set_index(['Cluster', 'index'], inplace=True)
+    else:
+        scores = pd.DataFrame(grouped_df.apply(group_scores, de_df, weighted_df))
     if 'gene' not in scores.index.names:
         scores.index.set_names('gene', level=1, inplace=True)
     scores = scores.reset_index().sort_values(['Cluster', 'score'], ascending=[False, False]).set_index('gene')

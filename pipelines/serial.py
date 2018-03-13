@@ -1,5 +1,6 @@
 import os
 import shutil
+import sys
 import tarfile
 
 import numpy as np
@@ -55,6 +56,7 @@ def analyze_permutes(real_scores, permutes_path, contrast) -> (pd.DataFrame, pd.
     p_score = pd.DataFrame()
     n_permutes = len(os.listdir(permutes_path))
     for p in os.listdir(permutes_path):
+        print(p)
         # Load data and fit to get permuted data p-values
         p_idx = p.split("_")[0]
         p_data = pd.read_pickle(os.path.join(permutes_path, p))
@@ -161,21 +163,23 @@ if __name__ == '__main__':
 
     # Prep the raw data
     project_name = "GSE69822"
-    prefix = "{}/{}_".format(project_name, project_name)
-    contrast = 'ki-wt'
+    contrast = 'ko-wt'
+    prefix = "{}/{}_{}_".format(project_name, project_name, contrast)
     raw = load_data('../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt')
     gene_map = pd.read_csv('../data/GSE69822/mcf10a_gene_names.csv', index_col=0)
     mk_ch_dir(project_name, ch=False)
 
     # Fit the data using a DEAnalysis object
-    # dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=True)
+    dea = dde(raw, contrast, project_name, save_permute_data=False, calc_p=True, voom=True)
+    # dea = pd.read_pickle("{}dea.pkl".format(prefix))            # type: DEAnalysis
+    der = dea.results[contrast]                                 # type: DEResults
+    print(der.top_table().head())
+    sys.exit()
 
     # Compile simulation results
     # sim_stats = compile_sim('../data/motif_library/gnw_networks/', times=[0, 15, 40, 90, 180, 300],
-    #                         save_path="{}{}_sim_stats.pkl".format(prefix, contrast))
-    sim_stats = pd.read_pickle("{}{}_sim_stats.pkl".format(prefix, contrast))
-    print(sim_stats)
-    # dea = pd.read_pickle()
+    #                         save_path="{}sim_stats.pkl".format(prefix))
+    sim_stats = pd.read_pickle("{}sim_stats.pkl".format(prefix))    # type: pd.DataFrame
 
     # Display results
     display()
