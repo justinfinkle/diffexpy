@@ -6,7 +6,7 @@ if __name__ == '__main__':
     data_dir = "../../data/motif_library/gnw_networks/"
 
     # Make a list of all the subdirectories
-    gnr = GnwNetResults(data_dir)
+    gnr = GnwNetResults(data_dir, experimental='ki')
     t = [0, 15, 40, 90, 180, 300]
-    all_stats = gnr.compile_results(censor_times=t)
-    all_stats.to_csv('../intermediate_data/sim_stats_mcf10a_censoredtimes.tsv', sep='\t')
+    all_stats = gnr.compile_results(censor_times=t, save_intermediates=False)
+    all_stats.to_csv('../intermediate_data/ki-wt_sim_stats_mcf10a_censoredtimes.tsv', sep='\t')

@@ -61,19 +61,22 @@ class GnwNetResults(object):
             id = os.path.basename(os.path.abspath(path))
             print(ii)
 
-            # Get the data
-            exp = GnwSimResults(path=path, sim_number=id, condition=self.experimental, sim_suffix=sim_suffix,
-                                perturb_suffix=perturb_suffix, censor_times=censor_times)
+            try:
+                # Get the data
+                exp = GnwSimResults(path=path, sim_number=id, condition=self.experimental, sim_suffix=sim_suffix,
+                                    perturb_suffix=perturb_suffix, censor_times=censor_times)
 
-            ctrl = GnwSimResults(path=path, sim_number=id, condition=self.control, sim_suffix=sim_suffix,
-                                 perturb_suffix=perturb_suffix, censor_times=censor_times)
+                ctrl = GnwSimResults(path=path, sim_number=id, condition=self.control, sim_suffix=sim_suffix,
+                                     perturb_suffix=perturb_suffix, censor_times=censor_times)
 
-            # Get results and save them
-            id_results = self.compare_conditions(exp.data, ctrl.data, id)
-            if save_intermediates:
-                id_results.to_csv(os.path.join(os.path.abspath(path), '{}_sim_stats.tsv'.format(id)), sep='\t')
+                # Get results and save them
+                id_results = self.compare_conditions(exp.data, ctrl.data, id)
+                if save_intermediates:
+                    id_results.to_csv(os.path.join(os.path.abspath(path), '{}_sim_stats.tsv'.format(id)), sep='\t')
 
-            results = pd.concat([results, id_results])
+                results = pd.concat([results, id_results])
+            except FileNotFoundError:
+                pass
 
         return results
 
@@ -86,7 +89,7 @@ class GnwNetResults(object):
         """
 
         full = pd.concat([exp, ctrl]).groupby(level=['x_perturbation', 'Time'])
-        results = full.apply(self.get_stats, 'ko', 'wt', axis).unstack()              # type: pd.DataFrame
+        results = full.apply(self.get_stats, self.experimental, self.control, axis).unstack()              # type: pd.DataFrame
         results = pd.concat([results], keys=[id], names=['id'])                     # type: pd.DataFrame
 
         # Move the gene names to the index

@@ -5,7 +5,7 @@ import tarfile
 import numpy as np
 import pandas as pd
 from pydiffexp import DEAnalysis, DEResults
-from pydiffexp.gnw import mk_ch_dir
+from pydiffexp.gnw import mk_ch_dir, GnwNetResults
 from scipy import stats
 
 
@@ -141,6 +141,17 @@ def dde(data, default_contrast, project_dir, n_permutes=100, permute_path=None, 
     return dea
 
 
+def compile_sim(sim_dir, times, save_path=None, **kwargs):
+    # Initialize the results object
+    gnr = GnwNetResults(sim_dir, **kwargs)
+
+    print("Compiling simulation results. This could take a while")
+    sim_results = gnr.compile_results(censor_times=times, save_intermediates=False)
+    if save_path is not None:
+        sim_results.to_pickle(save_path)
+    return sim_results
+
+
 def display():
     pass
 
@@ -150,12 +161,21 @@ if __name__ == '__main__':
 
     # Prep the raw data
     project_name = "GSE69822"
+    prefix = "{}/{}_".format(project_name, project_name)
     contrast = 'ki-wt'
     raw = load_data('../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt')
     gene_map = pd.read_csv('../data/GSE69822/mcf10a_gene_names.csv', index_col=0)
+    mk_ch_dir(project_name, ch=False)
 
     # Fit the data using a DEAnalysis object
-    dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=True)
+    # dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=True)
+
+    # Compile simulation results
+    # sim_stats = compile_sim('../data/motif_library/gnw_networks/', times=[0, 15, 40, 90, 180, 300],
+    #                         save_path="{}{}_sim_stats.pkl".format(prefix, contrast))
+    sim_stats = pd.read_pickle("{}{}_sim_stats.pkl".format(prefix, contrast))
+    print(sim_stats)
+    # dea = pd.read_pickle()
 
     # Display results
     display()
