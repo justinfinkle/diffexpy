@@ -830,7 +830,7 @@ class DEAnalysis(object):
         db.sort_index(axis=1, inplace=True, level=0)
         return db
 
-    def to_pickle(self, path):
+    def to_pickle(self, path, force_save=False):
         # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame
         """
         Pickle (serialize) object to input file path
@@ -845,7 +845,7 @@ class DEAnalysis(object):
             sys.exit('The directory entered to save the pickle to, "%s", does not exist' % os.path.dirname(path))
 
         # If the pickle path exists, ask if the user wants to save over it
-        if os.path.isfile(path):
+        if os.path.isfile(path) and not force_save:
             print("Pickle file to save: ", path)
             answer = input('The proposed pickle file already exists. Would you like to replace it [y/n]?')
             if answer != 'y':
