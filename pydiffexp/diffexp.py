@@ -286,12 +286,18 @@ class DEResults(MArrayLM):
         df = rh.rvect_to_py(decide).astype(int)
         return df
 
-    def score_clustering(self):
+    def score_clustering(self, ind_p=0.05):
+        # Calculate the weighted log fold change as lfc*(1-pvalue) at each time point
         weighted_lfc = (1 - self.p_value) * self.continuous.loc[self.p_value.index, self.p_value.columns]
-        grouped = self.cluster_discrete(self.decide_tests(p_value=0.05)).groupby('Cluster')
+
+        # Group genes by clusters
+        grouped = self.cluster_discrete(self.decide_tests(p_value=ind_p)).groupby('Cluster')
+
+        # Score the clustering
         scores = get_scores(grouped, self.continuous.loc[:, self.p_value.columns], weighted_lfc).sort_index()
         scores['score'] = scores['score']*(1-self.continuous['adj_pval']).sort_index().values
         scores.sort_values('score', ascending=False, inplace=True)
+
         return scores
 
 
