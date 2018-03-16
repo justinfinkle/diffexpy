@@ -1,3 +1,4 @@
+import ast
 import itertools
 import os
 import sys
@@ -24,6 +25,18 @@ stats = importr('stats')
 
 # Set null variable
 null = robjects.r("NULL")
+
+
+def cluster_discrete(df) -> pd.DataFrame:
+    """
+    Cluster trajectories into tuples that can be easily counted
+    :param df: DataFrame; expected to come from decide_tests
+    :return:
+    """
+    clusters = [str(tuple(gene)) for gene in df.values]
+    cluster_df = pd.DataFrame(clusters, index=df.index, columns=['Cluster'])
+
+    return cluster_df
 
 
 def cluster_to_array(cluster: str):
@@ -158,7 +171,7 @@ class DEResults(MArrayLM):
                                 'p_value': 0.05, 'lfc': 0}                              # type: dict
         self.continuous = self.top_table(**self.continuous_kwargs)                      # type: pd.DataFrame
         self.discrete = self.decide_tests(**self.discrete_kwargs)                       # type: pd.DataFrame
-        self.discrete_clusters = self.cluster_discrete(self.discrete)                   # type: pd.DataFrame
+        self.discrete_clusters = cluster_discrete(self.discrete)                        # type: pd.DataFrame
         self.cluster_count = self.count_clusters(self.discrete_clusters)                # type: pd.DataFrame
         self.all_results = self.aggregate_results()                                     # type: pd.DataFrame
 
@@ -207,18 +220,6 @@ class DEResults(MArrayLM):
             pass
 
         return cluster_count
-
-    @staticmethod
-    def cluster_discrete(df) -> pd.DataFrame:
-        """
-        Cluster trajectories into tuples that can be easily counted
-        :param df: DataFrame; expected to come from decide_tests
-        :return:
-        """
-        clusters = [str(tuple(gene)) for gene in df.values]
-        cluster_df = pd.DataFrame(clusters, index=df.index, columns=['Cluster'])
-
-        return cluster_df
 
     def top_table(self, use_fstat=None, p=1, n='inf', **kwargs) -> pd.DataFrame:
         """
@@ -304,7 +305,7 @@ class DEResults(MArrayLM):
         weighted_lfc = (1 - self.p_value) * self.continuous.loc[self.p_value.index, self.p_value.columns]
 
         # Group genes by clusters
-        grouped = self.cluster_discrete(self.decide_tests(p_value=ind_p)).groupby('Cluster')
+        grouped = cluster_discrete(self.decide_tests(p_value=ind_p)).groupby('Cluster')
 
         # Score the clustering
         scores = get_scores(grouped, self.continuous.loc[:, self.p_value.columns], weighted_lfc).sort_index()
@@ -338,6 +339,7 @@ class DEAnalysis(object):
         self.conditions = None              # type: list
         self.replicates = None              # type: list
         self.voom = voom                    # type: bool
+        self.voom_data = None               # type: pd.DataFrame
         self.default_contrasts = None
         self.timeseries = False             # type: bool
         self.samples = None                 # type: list
@@ -635,6 +637,11 @@ class DEAnalysis(object):
             # plt.show()
             # sys.exit()
             data = voom_results['E']
+
+            # Set the voom data
+            self.voom_data = voom_results['E'].copy()
+            cols_as_tup = list(map(ast.literal_eval, self.voom_data.columns.values))
+            self.voom_data.columns = pd.MultiIndex.from_tuples(cols_as_tup, names=['condition', 'rep', 'time'])
         else:
             # Log transform expression and correct values if needed
             if log2:
