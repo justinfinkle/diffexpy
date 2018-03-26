@@ -1,3 +1,4 @@
+import multiprocessing as mp
 import os
 from glob import iglob
 
@@ -19,6 +20,56 @@ def threshold(lfc_df, p_df, lfc_thresh=1, p_thresh=0.05):
     sign[p_df > p_thresh] = 0
 
     return sign.astype(int)
+
+
+def compare_conditions(exp: pd.DataFrame, ctrl: pd.DataFrame, id, experimental='ko', control='wt', axis=0):
+    """
+
+    :param exp:
+    :param ctrl:
+    :return:
+    """
+
+    full = pd.concat([exp, ctrl]).groupby(level=['x_perturbation', 'Time'])
+    results = full.apply(get_stats, experimental, control, axis).unstack()              # type: pd.DataFrame
+    results = pd.concat([results], keys=[id], names=['id'])                     # type: pd.DataFrame
+
+    # Move the gene names to the index
+    results = results.stack(1)
+
+    return results
+
+
+def get_stats(df, exp, ctrl, axis=0):
+    """
+    Calculate pvalues between conditions. Intended to use with "apply" from a pandas grouped dataframe
+    :param df:
+    :param exp:
+    :param ctrl:
+    :param axis:
+    :return:
+    """
+    # todo: this throws a weird warning if the wrong axis is used
+    p_val = stats.ttest_rel(df.loc[exp], df.loc[ctrl], axis=axis).pvalue
+    exp_mean = np.mean(df.loc[exp], axis=axis)
+    ctrl_mean = np.mean(df.loc[ctrl], axis=axis)
+    lfc = np.log2(exp_mean/ctrl_mean)
+
+    n = df.shape[1]
+    multiindex = [np.array(['lfc']*n+['lfc_pvalue']*n+['{}_mean'.format(exp)]*n+['{}_mean'.format(ctrl)]*n),
+                  np.array((df.columns.values.tolist()*4))]
+    info = pd.Series(data=np.concatenate((lfc, p_val, exp_mean, ctrl_mean)), index=multiindex)
+    info.index.names = ['stat', 'gene']
+
+    return info
+
+
+def get_results(fp, experimental, control, sim, p, t):
+    id = os.path.basename(os.path.abspath(fp))
+    exp = GnwSimResults(path=fp, sim_number=id, condition=experimental, sim_suffix=sim, perturb_suffix=p, censor_times=t)
+    ctrl = GnwSimResults(path=fp, sim_number=id, condition=control, sim_suffix=sim, perturb_suffix=p, censor_times=t)
+    id_results = compare_conditions(exp.data, ctrl.data, id, experimental=experimental, control=control)
+    return id_results
 
 
 class GnwNetResults(object):
@@ -44,7 +95,7 @@ class GnwNetResults(object):
         self.control = control
 
     def compile_results(self, censor_times=None, sim_suffix='dream4_timeseries.tsv',
-                        perturb_suffix="dream4_timeseries_perturbations.tsv", save_intermediates=True):
+                        perturb_suffix="dream4_timeseries_perturbations.tsv", save_intermediates=False, pp=True):
         """
         Calculate log fold change and corresponding statistics across all networks
 
@@ -55,45 +106,39 @@ class GnwNetResults(object):
         :param censor_times: array-like; time points in the time series to keep for analysis (misnomer).
         :return:
         """
-        results = pd.DataFrame()
+
         print('Compling results...')
-        for ii, path in enumerate(self.sim_paths):
-            id = os.path.basename(os.path.abspath(path))
-            print(ii)
+        if pp:
+            pool_args = [(f, self.experimental, self.control, sim_suffix, perturb_suffix, censor_times) for f in
+                         self.sim_paths if os.path.isdir(os.path.join(os.path.abspath(f), "{}_sim".format(self.experimental)))]
+            pool = mp.Pool()
+            df_list = pool.starmap(get_results, pool_args)
+            pool.close()
+            pool.join()
+            results = pd.concat(df_list)
 
-            try:
-                # Get the data
-                exp = GnwSimResults(path=path, sim_number=id, condition=self.experimental, sim_suffix=sim_suffix,
-                                    perturb_suffix=perturb_suffix, censor_times=censor_times)
+        else:
+            results = pd.DataFrame()
+            for ii, path in enumerate(self.sim_paths):
+                id = os.path.basename(os.path.abspath(path))
+                # print(ii)
 
-                ctrl = GnwSimResults(path=path, sim_number=id, condition=self.control, sim_suffix=sim_suffix,
-                                     perturb_suffix=perturb_suffix, censor_times=censor_times)
+                try:
+                    # Get the data
+                    exp = GnwSimResults(path=path, sim_number=id, condition=self.experimental, sim_suffix=sim_suffix,
+                                        perturb_suffix=perturb_suffix, censor_times=censor_times)
 
-                # Get results and save them
-                id_results = self.compare_conditions(exp.data, ctrl.data, id)
-                if save_intermediates:
-                    id_results.to_csv(os.path.join(os.path.abspath(path), '{}_sim_stats.tsv'.format(id)), sep='\t')
+                    ctrl = GnwSimResults(path=path, sim_number=id, condition=self.control, sim_suffix=sim_suffix,
+                                         perturb_suffix=perturb_suffix, censor_times=censor_times)
 
-                results = pd.concat([results, id_results])
-            except FileNotFoundError:
-                pass
+                    # Get results and save them
+                    id_results = compare_conditions(exp.data, ctrl.data, id, self.experimental, self.control)
+                    if save_intermediates:
+                        id_results.to_csv(os.path.join(os.path.abspath(path), '{}_sim_stats.tsv'.format(id)), sep='\t')
 
-        return results
-
-    def compare_conditions(self, exp: pd.DataFrame, ctrl: pd.DataFrame, id, axis=0):
-        """
-
-        :param exp:
-        :param ctrl:
-        :return:
-        """
-
-        full = pd.concat([exp, ctrl]).groupby(level=['x_perturbation', 'Time'])
-        results = full.apply(self.get_stats, self.experimental, self.control, axis).unstack()              # type: pd.DataFrame
-        results = pd.concat([results], keys=[id], names=['id'])                     # type: pd.DataFrame
-
-        # Move the gene names to the index
-        results = results.stack(1)
+                    results = pd.concat([results, id_results])
+                except FileNotFoundError:
+                    pass
 
         return results
 
