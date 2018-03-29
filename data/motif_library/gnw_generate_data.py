@@ -1,6 +1,8 @@
 import functools
+import multiprocessing as mp
 import operator
 import os
+import subprocess
 import time
 
 import networkx as nx
@@ -61,6 +63,42 @@ def topo_dict(signed, unsigned):
     return iso_dict
 
 
+def simulate(net_file, save_path):
+    # Simulate
+    simulate_network(net_file, save_dir=save_path)
+
+def gnw_call(call_list, stdout=None, stderr=subprocess.PIPE, **kwargs):
+    devnull = open(os.devnull, 'w')
+    if stdout is None:
+        stdout = devnull
+    if stderr is None:
+        stderr = devnull
+    p = subprocess.Popen(jar_call + call_list, stdout=stdout, stderr=stderr, **kwargs)
+    output, err = p.communicate()
+
+    if err is not None:
+        err = err.decode('utf-8')
+
+    if p.returncode or ((err is not None) and ('Exception' in err)):
+        raise Exception(err)
+
+def simulate_network(network_file, save_dir=None, network_name=None, settings=None):
+    if settings is None:
+        settings = settings_default
+    call_list = ['--simulate', '-c', settings, '--input-net', network_file]
+    if network_name is not None:
+        call_list += ['--network-name', network_name]
+    end_dir = os.getcwd()
+    if save_dir is not None:
+        # Temporarily change the directory because the GNW flag for the output directory doesn't seem to work
+        os.chdir(save_dir)
+
+    # Make call to GNW
+    gnw_call(call_list)
+
+    # Reset the directory
+    os.chdir(end_dir)
+
 if __name__ == '__main__':
     """
     READ FIRST!
@@ -70,11 +108,13 @@ if __name__ == '__main__':
 
     directory = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/motif_library/'
     jar_loc = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/gnw/gnw-3.1.2b.jar'
+    jar_call = ['java', '-jar', jar_loc]
 
     unique_graphs_path = directory + 'unique_wc_3node_signed_noself_nets.pkl'
     unsigned_path = directory + 'unique_wc_3node_unsigned_noself_nets.pkl'
     output_base = directory + 'gnw_networks/'
     sim_settings = output_base + 'settings.txt'
+    settings_default = os.path.abspath(sim_settings)
     ko_gene = 'G'
 
     # Get unique network pickle
@@ -95,6 +135,9 @@ if __name__ == '__main__':
     sim_info = pd.DataFrame()
     start = time.time()
     input_types = {'activating': '+', 'deactivating': "-"}
+
+    # Create a pool of workers
+    pool = mp.Pool()
 
     for ug_num, network in enumerate(unique_graphs):
         save_path = "{}{}".format(output_base, sim_counter)
@@ -144,6 +187,7 @@ if __name__ == '__main__':
             combo_order = g.combo_order
             combo_tree.write(original_xml.replace('original', 'combo'))
 
+            starmap_iterable = []
             for stim_type, sign in input_types.items():
                 current_path = mk_ch_dir("{}{}/".format(save_path, stim_type))
                 # Load original XML
@@ -174,9 +218,11 @@ if __name__ == '__main__':
                 g.perturbations.to_csv('{}{}_ko_dream4_timeseries_perturbations.tsv'.format(ko_sim_path, sim_counter),
                                        sep='\t', index=False)
 
+                starmap_iterable.append((current_path + wt_filename, wt_sim_path))
                 # Simulate
-                g.simulate_network(current_path + wt_filename, save_dir=wt_sim_path)
-                g.simulate_network(current_path + ko_filename, save_dir=ko_sim_path)
+                # g.simulate_network(current_path + wt_filename, save_dir=wt_sim_path)
+                # g.simulate_network(current_path + ko_filename, save_dir=ko_sim_path)
+            pool.starmap(simulate, starmap_iterable)
 
             # Save the information
             feature_info = {'net': sim_counter, 'unsigned_group': ug_num,
@@ -198,3 +244,6 @@ if __name__ == '__main__':
     sim_info.set_index('net', inplace=True)
     sim_info.fillna(0, inplace=True)
     sim_info.to_pickle(output_base+'simulation_info.pkl')
+    pool.close()
+    pool.join()
+
