@@ -94,6 +94,7 @@ if __name__ == '__main__':
     sim_counter = 0
     sim_info = pd.DataFrame()
     start = time.time()
+    input_types = {'activating': '+', 'deactivating': "-"}
 
     for ug_num, network in enumerate(unique_graphs):
         save_path = "{}{}".format(output_base, sim_counter)
@@ -122,6 +123,9 @@ if __name__ == '__main__':
             g.load_sbml(g.original_sbml)
         except:
             g.load_sbml(o_sbml)
+
+        # Keep the unmodified tree
+        base_tree = g.tree
         for cc, combo in enumerate(g.rxn_combos):
             t = time.time()
 
@@ -131,35 +135,48 @@ if __name__ == '__main__':
             g.set_outpath(save_path)
             edge_path = '{}_goldstandard_signed.tsv'.format(sim_counter)
             dot_path = '{}_network_diagram'.format(sim_counter)
-            original_xml = '{}_original.xml'.format(sim_counter)
+            original_xml = os.path.abspath('{}_original.xml'.format(sim_counter))
+            g.tree = base_tree.copy()
             g.save_signed_df(filename=edge_path)
             g.draw_graph(filename=dot_path)
             g.tree.write(original_xml)
-
-            # Write the wt and ko xmls
-            # Make the directory and change to it
-            wt_filename = '{}_wt.xml'.format(sim_counter)
-            ko_filename = wt_filename.replace('wt', 'ko')
             combo_tree = g.modify_tree_rxns(combo)
+            combo_order = g.combo_order
+            combo_tree.write(original_xml.replace('original', 'combo'))
 
-            # Write the WT and KO SBMLs
-            combo_tree.write(wt_filename)
-            ko_tree = combo_tree.make_ko_sbml(ko_gene)
-            ko_tree.write(ko_filename)
-            wt_sim_path = save_path + '/wt_sim/'
-            ko_sim_path = save_path + '/ko_sim/'
-            mk_ch_dir(wt_sim_path, ch=False)
-            mk_ch_dir(ko_sim_path, ch=False)
+            for stim_type, sign in input_types.items():
+                current_path = mk_ch_dir("{}{}/".format(save_path, stim_type))
+                # Load original XML
+                g.load_sbml(original_xml.replace('original', 'combo'), add_rxn=False)
 
-            # Write perturbations
-            g.perturbations.to_csv('{}{}_wt_dream4_timeseries_perturbations.tsv'.format(wt_sim_path, sim_counter),
-                                   sep='\t', index=False)
-            g.perturbations.to_csv('{}{}_ko_dream4_timeseries_perturbations.tsv'.format(ko_sim_path, sim_counter),
-                                   sep='\t', index=False)
+                # Add the new input node, save the modified xml, and load it for use
+                g.add_input(sign=sign)
+                g.tree.write("{}{}_{}.xml".format(current_path, sim_counter, stim_type))
+                g.load_sbml("{}{}_{}.xml".format(current_path, sim_counter, stim_type), add_rxn=False)
 
-            # Simulate
-            g.simulate_network(save_path + wt_filename, save_dir=wt_sim_path)
-            g.simulate_network(save_path + ko_filename, save_dir=ko_sim_path)
+                # Write the wt and ko xmls
+                # Make the directory and change to it
+                wt_filename = '{}_wt.xml'.format(sim_counter)
+                ko_filename = wt_filename.replace('wt', 'ko')
+
+                # Write the WT and KO SBMLs
+                g.tree.write(wt_filename)
+                ko_tree = g.tree.make_ko_sbml(ko_gene)
+                ko_tree.write(ko_filename)
+                wt_sim_path = current_path + '/wt_sim/'
+                ko_sim_path = current_path + '/ko_sim/'
+                mk_ch_dir(wt_sim_path, ch=False)
+                mk_ch_dir(ko_sim_path, ch=False)
+
+                # Write perturbations
+                g.perturbations.to_csv('{}{}_wt_dream4_timeseries_perturbations.tsv'.format(wt_sim_path, sim_counter),
+                                       sep='\t', index=False)
+                g.perturbations.to_csv('{}{}_ko_dream4_timeseries_perturbations.tsv'.format(ko_sim_path, sim_counter),
+                                       sep='\t', index=False)
+
+                # Simulate
+                g.simulate_network(current_path + wt_filename, save_dir=wt_sim_path)
+                g.simulate_network(current_path + ko_filename, save_dir=ko_sim_path)
 
             # Save the information
             feature_info = {'net': sim_counter, 'unsigned_group': ug_num,
@@ -167,7 +184,7 @@ if __name__ == '__main__':
             for source, target, data in g.in_edges(data=True):
                 feature_info['{}->{}'.format(source, target)] = data['sign']
                 feature_info['{}_in'.format(target)] += 1
-            for ii, target in enumerate(g.combo_order):
+            for ii, target in enumerate(combo_order):
                 feature_info[target + '_logic'] = combo[ii]
             series = pd.Series(feature_info)
 

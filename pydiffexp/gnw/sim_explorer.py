@@ -9,8 +9,10 @@ def tsv_to_dg(path):
     :param path:
     :return:
     """
-    df = pd.read_csv(path, sep='\t', header=None, names=['Source', 'Target', 'Sign'])               # type: pd.DataFrame
-    dg = nx.from_pandas_dataframe(df, source='Source', target='Target', create_using=nx.DiGraph())  # type: nx.DiGraph
+    df = pd.read_csv(path, sep='\t', header=None, names=['Source', 'Target', 'sign'])               # type: pd.DataFrame
+    df['sign'][df['sign'] == '+'] = 1
+    df['sign'][df['sign'] == '-'] = -1
+    dg = nx.from_pandas_dataframe(df, source='Source', target='Target', edge_attr=True, create_using=nx.DiGraph())  # type: nx.DiGraph
     return df, dg
 
 

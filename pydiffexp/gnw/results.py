@@ -30,7 +30,7 @@ def compare_conditions(exp: pd.DataFrame, ctrl: pd.DataFrame, id, experimental='
     :return:
     """
 
-    full = pd.concat([exp, ctrl]).groupby(level=['x_perturbation', 'Time'])
+    full = pd.concat([exp, ctrl]).groupby(level=['perturbation', 'Time'])
     results = full.apply(get_stats, experimental, control, axis).unstack()              # type: pd.DataFrame
     results = pd.concat([results], keys=[id], names=['id'])                     # type: pd.DataFrame
 
@@ -172,7 +172,7 @@ class GnwSimResults(object):
     Load, manage, and analyze results from the GeneNetWeaver simulation results
     """
     def __init__(self, path, sim_number, condition, sim_suffix='dream4_timeseries.tsv',
-                 perturb_suffix="dream4_timeseries_perturbations.tsv",censor_times=None):
+                 perturb_suffix="dream4_timeseries_perturbations.tsv", censor_times=None, p_gene='u'):
         self.path = path
         self.id = sim_number
         self.condition = condition
@@ -184,6 +184,7 @@ class GnwSimResults(object):
         self.timeseries_data = None
         self.perturbation_data = None
         self.censor_times = censor_times
+        self.p_gene = p_gene
         self.data = None
 
         # Load and curate data
@@ -221,7 +222,7 @@ class GnwSimResults(object):
     def annotate_data(self):
         times = sorted(list(set(self.timeseries_data['Time'].values)))
         n_timeseries = len(self.timeseries_data) / len(times)
-        perturbations = np.array(sorted(list(set(self.perturbation_data['x']))))
+        perturbations = np.array(sorted(list(set(self.perturbation_data[self.p_gene]))))
 
         # For safety
         if not n_timeseries.is_integer():
@@ -239,15 +240,15 @@ class GnwSimResults(object):
         ts_rep_list = p_rep_list[ts_p_index]
 
         # Get the actual perturbation value used in the simulation for each row of the time series
-        ts_p_list = self.perturbation_data.loc[list(ts_p_index), 'x'].values
+        ts_p_list = self.perturbation_data.loc[list(ts_p_index), self.p_gene].values
 
         # Add the annotations to the dataframe
         annotated_data = self.timeseries_data.copy()
-        annotated_data['x_perturbation'] = ts_p_list
+        annotated_data['perturbation'] = ts_p_list
         annotated_data['rep'] = ts_rep_list
         annotated_data['condition'] = self.condition
 
-        annotated_data.set_index(['condition', 'rep', 'x_perturbation', 'Time'], inplace=True)
+        annotated_data.set_index(['condition', 'rep', 'perturbation', 'Time'], inplace=True)
         annotated_data.sort_index(inplace=True)
 
         return annotated_data
@@ -278,11 +279,11 @@ class GnwSimResults(object):
 
         return
 
-    def calc_sim_stats(self, grouping=('x_perturbation', 'Time'), calc=('mean', 'std')):
+    def calc_sim_stats(self, grouping=('perturbation', 'Time'), calc=('mean', 'std')):
         """
         Calculate stats across different dimensions
         :param grouping: list-like; strings in the multiindex that define the groupby object. Default is
-            'x_perturbation' and 'Time'.
+            'perturbation' and 'Time'.
         :param calc: list-like; str for pandas builtin or func that can be used on each series defined in the grouping.
             Defaults are mean and std.
         :return:
