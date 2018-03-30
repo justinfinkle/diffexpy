@@ -4,11 +4,9 @@ import operator
 import os
 import subprocess
 import time
-import itertools as it
 
 import networkx as nx
 import pandas as pd
-import numpy as np
 from pydiffexp.gnw.simulation import GnwNetwork, mk_ch_dir
 
 
