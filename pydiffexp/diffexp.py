@@ -641,7 +641,7 @@ class DEAnalysis(object):
             # Set the voom data
             self.voom_data = voom_results['E'].copy()
             cols_as_tup = list(map(ast.literal_eval, self.voom_data.columns.values))
-            self.voom_data.columns = pd.MultiIndex.from_tuples(cols_as_tup, names=['condition', 'rep', 'time'])
+            self.voom_data.columns = pd.MultiIndex.from_tuples(cols_as_tup, names=self.data.columns.names)
         else:
             # Log transform expression and correct values if needed
             if log2:

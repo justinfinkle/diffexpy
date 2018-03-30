@@ -3,15 +3,16 @@ import numpy as np
 import pandas as pd
 
 
-def tsv_to_dg(path):
+def tsv_to_dg(path, str_to_int=True):
     """
     Read a GNW gold standard tsv and return a dataframe and a DiGraph
     :param path:
     :return:
     """
     df = pd.read_csv(path, sep='\t', header=None, names=['Source', 'Target', 'sign'])               # type: pd.DataFrame
-    df['sign'][df['sign'] == '+'] = 1
-    df['sign'][df['sign'] == '-'] = -1
+    if str_to_int:
+        df['sign'][df['sign'] == '+'] = 1
+        df['sign'][df['sign'] == '-'] = -1
     dg = nx.from_pandas_dataframe(df, source='Source', target='Target', edge_attr=True, create_using=nx.DiGraph())  # type: nx.DiGraph
     return df, dg
 
