@@ -219,6 +219,7 @@ if __name__ == '__main__':
                                        sep='\t', index=False)
 
                 starmap_iterable.append((current_path + wt_filename, wt_sim_path))
+                starmap_iterable.append((current_path + ko_filename, ko_sim_path))
                 # Simulate
                 # g.simulate_network(current_path + wt_filename, save_dir=wt_sim_path)
                 # g.simulate_network(current_path + ko_filename, save_dir=ko_sim_path)

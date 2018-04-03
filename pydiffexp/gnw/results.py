@@ -66,10 +66,17 @@ def get_stats(df, exp, ctrl, axis=0):
 
 def get_results(fp, experimental, control, sim, p, t):
     id = os.path.basename(os.path.abspath(fp))
-    exp = GnwSimResults(path=fp, sim_number=id, condition=experimental, sim_suffix=sim, perturb_suffix=p, censor_times=t)
-    ctrl = GnwSimResults(path=fp, sim_number=id, condition=control, sim_suffix=sim, perturb_suffix=p, censor_times=t)
-    id_results = compare_conditions(exp.data, ctrl.data, id, experimental=experimental, control=control)
-    return id_results
+    print(fp)
+    results = pd.DataFrame()
+    for stim_type in ['activating', 'deactivating']:
+        exp = GnwSimResults(path="{}{}/".format(fp, stim_type), sim_number=id, condition=experimental, sim_suffix=sim, perturb_suffix=p, censor_times=t)
+        ctrl = GnwSimResults(path="{}{}/".format(fp, stim_type), sim_number=id, condition=control, sim_suffix=sim, perturb_suffix=p, censor_times=t)
+        id_results = compare_conditions(exp.data, ctrl.data, id, experimental=experimental, control=control)
+        if stim_type == 'deactivating':
+            id_results.index.set_levels(-id_results.index.get_level_values('perturbation'), 'perturbation', inplace=True)
+        results = pd.concat([results, id_results])
+
+    return results
 
 
 class GnwNetResults(object):
@@ -110,7 +117,8 @@ class GnwNetResults(object):
         print('Compling results...')
         if pp:
             pool_args = [(f, self.experimental, self.control, sim_suffix, perturb_suffix, censor_times) for f in
-                         self.sim_paths if os.path.isdir(os.path.join(os.path.abspath(f), "{}_sim".format(self.experimental)))]
+                         self.sim_paths if os.path.isdir(os.path.join(os.path.abspath(f), 'activating',
+                                                                      "{}_sim".format(self.experimental)))]
             pool = mp.Pool()
             df_list = pool.starmap(get_results, pool_args)
             pool.close()
