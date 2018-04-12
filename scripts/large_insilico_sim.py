@@ -1,3 +1,6 @@
+import os
+import sys
+
 import numpy as np
 import pandas as pd
 from gnw.simulation import GnwNetwork, mk_ch_dir
@@ -5,13 +8,21 @@ from pydiffexp.gnw import tsv_to_dg, degree_info
 
 if __name__ == '__main__':
     jar_loc = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/gnw/gnw-3.1.2b.jar'
-    base = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/insilico/strongly_connected/Yeast-100.tsv'
+    base = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/insilico/strongly_connected_2/Yeast-100.tsv'
     save_path = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/insilico/strongly_connected_2/'
     save_str = "Yeast-100_anon"
 
     # Load in the base network
     df, dg = tsv_to_dg(base, False)
     nodes = list(dg.nodes())
+
+    # Check if data should be rewritten
+    if os.path.isdir(save_path):
+        override = input('The directory {} already exists. \nDo you want to rewrite the existing data (y/[n])? '.format(save_path))
+        if override != 'y':
+            sys.exit('Data not generated')
+        else:
+            pass
 
     # Anonymize the gene names
     mk_ch_dir(save_path, ch=False)
@@ -40,6 +51,7 @@ if __name__ == '__main__':
 
     # Global regulator
     high_out = anon_dict['YKL062W']
+    print(ko_gene, high_out)
 
     input_node = 'u'
     n_reps = 3
@@ -50,7 +62,7 @@ if __name__ == '__main__':
     net = GnwNetwork(dg, jar_path=jar_loc, out_path='.', settings=("{}/settings.txt".format(save_path)),
                      perturbations=perturb)
     # Save perturbations
-    perturb.to_csv("{}perturbations.csv".format(save_path))
+    perturb.to_csv("{}perturbations.csv".format(save_path), index=False)
     input_types = {'activating': '+', 'deactivating': "-"}
 
     for stim_type, sign in input_types.items():
