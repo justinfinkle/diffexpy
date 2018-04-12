@@ -77,24 +77,33 @@ def get_scores(grouped_df, de_df, weighted_df):
     return scores
 
 
-def group_scores(cluster, de_df, gene_info):
+def group_scores(cluster, de: pd.DataFrame, weighted_de: pd.DataFrame):
     """
     Score how well each trajectory matches the cluster
     :param cluster:
-    :param de_df:
-    :param gene_info:
+    :param de:
+    :param weighted_de:
     :return: series
     """
     # Get the scores for each trajectory based on the assumed cluster
-    expected = cluster_to_array(cluster.name)
-    clus_lfc = gene_info.loc[cluster.index]
-    penalty = -np.abs(np.sign(clus_lfc).values - expected)
-    scores = np.abs(clus_lfc).values * penalty + np.abs(clus_lfc).values * (penalty == 0)  # type: np.ndarray
+    expected = np.array(eval(cluster.name))
+    clus_de = de.loc[cluster.index]
+    clus_wde = weighted_de.loc[cluster.index]
+    diff = clus_de - clus_wde
+    correct_de = ~np.abs(np.sign(clus_wde).values - expected).astype(bool)
+    penalty = (correct_de*diff + (~correct_de)*clus_wde).abs().sum(axis=1)
+    score = (correct_de*clus_wde + (~correct_de)*diff).abs().sum(axis=1)
+
+    # scores = np.abs(clus_wde).values * penalty + np.abs(clus_wde).values * (penalty == 0)  # type: np.ndarray
 
     # Calculate fraction of the lfc that was retained
-    score_frac = np.sum(scores, axis=1)/np.sum(np.abs(de_df.loc[cluster.index]).values, axis=1)
+    score_frac = (score-penalty)/clus_de.abs().sum(axis=1)
+    # score_frac = np.sum(scores, axis=1)/np.sum(np.abs(de_df.loc[cluster.index]).values, axis=1)
+    # score_frac = 1 - (de.loc[cluster.index] - clus_wde).abs().sum(axis=1) / de.loc[cluster.index].abs().sum(axis=1)
+    score_frac.name = 'score'
 
-    return pd.Series(data=score_frac, index=cluster.index, name='score')
+    return score_frac
+    # return pd.Series(data=score_frac, index=cluster.index, name='score')
 
 
 class MArrayLM(object):
@@ -300,12 +309,13 @@ class DEResults(MArrayLM):
         df = rh.rvect_to_py(decide).astype(int)
         return df
 
-    def score_clustering(self, ind_p=0.05):
+    def score_clustering(self, grouped=None, ind_p=0.05):
         # Calculate the weighted log fold change as lfc*(1-pvalue) at each time point
         weighted_lfc = (1 - self.p_value) * self.continuous.loc[self.p_value.index, self.p_value.columns]
 
         # Group genes by clusters
-        grouped = cluster_discrete(self.decide_tests(p_value=ind_p)).groupby('Cluster')
+        if grouped is None:
+            grouped = cluster_discrete(self.decide_tests(p_value=ind_p)).groupby('Cluster')
 
         # Score the clustering
         scores = get_scores(grouped, self.continuous.loc[:, self.p_value.columns], weighted_lfc).sort_index()
