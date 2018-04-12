@@ -1,5 +1,6 @@
 import multiprocessing as mp
 import os
+import sys
 from glob import iglob
 
 import numpy as np
@@ -37,7 +38,7 @@ def compare_conditions(exp: pd.DataFrame, ctrl: pd.DataFrame, id, experimental='
     # Move the gene names to the index
     results = results.stack(1)
 
-    return results
+    return results.sort_index()
 
 
 def get_stats(df, exp, ctrl, axis=0):
@@ -71,9 +72,14 @@ def get_results(fp, experimental, control, sim, p, t):
     for stim_type in ['activating', 'deactivating']:
         exp = GnwSimResults(path="{}{}/".format(fp, stim_type), sim_number=id, condition=experimental, sim_suffix=sim, perturb_suffix=p, censor_times=t)
         ctrl = GnwSimResults(path="{}{}/".format(fp, stim_type), sim_number=id, condition=control, sim_suffix=sim, perturb_suffix=p, censor_times=t)
-        id_results = compare_conditions(exp.data, ctrl.data, id, experimental=experimental, control=control)
+        try:
+            id_results = compare_conditions(exp.data, ctrl.data, id, experimental=experimental, control=control)
+        except:
+            print('error with {}'.format(fp))
+            sys.exit(fp)
         if stim_type == 'deactivating':
-            id_results.index.set_levels(-id_results.index.get_level_values('perturbation'), 'perturbation', inplace=True)
+            id_results.index.set_levels(-id_results.index.get_level_values('perturbation').unique(), 'perturbation', inplace=True)
+            id_results.drop(0, level='perturbation', inplace=True)
         results = pd.concat([results, id_results])
 
     return results
@@ -111,6 +117,7 @@ class GnwNetResults(object):
         :param sim_suffix: str; identifier for time series simulation data. See GnwSimResults
         :param perturb_suffix: str; identifier for perturbation data. See GnwSimResults
         :param censor_times: array-like; time points in the time series to keep for analysis (misnomer).
+        :param pp: boolean; parallel processing
         :return:
         """
 
@@ -234,12 +241,24 @@ class GnwSimResults(object):
 
         # For safety
         if not n_timeseries.is_integer():
+            print(self.timeseries_data_file)
             raise ValueError('Number of time points for each replicate is not the same')
 
         assert n_timeseries == len(self.perturbation_data)
 
         # Assign replicate number to each row of the perturbations
-        p_rep_list = np.ceil((self.perturbation_data.index.values + 1) / len(perturbations)).astype(int)
+        # todo: optimize
+        p_rep_list = []
+        for p in perturbations:
+            rep = 1
+            for val in self.perturbation_data.loc[:, self.p_gene].values:
+                if val == p:
+                    p_rep_list.append(rep)
+                    rep += 1
+        p_rep_list = np.array(p_rep_list)
+
+        # This old method assumes a set structure to the perturbations
+        # p_rep_list = np.ceil((self.perturbation_data.index.values + 1) / len(perturbations)).astype(int)
 
         # For each row in the time series, calculate the perturbation simulation index
         ts_p_index = np.ceil((self.timeseries_data.index.values + 1) / len(times)).astype(int) - 1
@@ -257,6 +276,8 @@ class GnwSimResults(object):
         annotated_data['condition'] = self.condition
 
         annotated_data.set_index(['condition', 'rep', 'perturbation', 'Time'], inplace=True)
+        # There should be no duplicates
+        assert annotated_data.index.duplicated().sum() == 0
         annotated_data.sort_index(inplace=True)
 
         return annotated_data
