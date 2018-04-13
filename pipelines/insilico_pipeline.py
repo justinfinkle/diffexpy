@@ -17,55 +17,30 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 
-def load_insilico_data(path, conditions, stimuli, net_name, times=None):
+def load_insilico_data(path, conditions, stimuli, net_name, times=None) -> pd.DataFrame:
+    """
+
+    :param path:
+    :param conditions:
+    :param stimuli:
+    :param net_name:
+    :param times:
+    :return:
+    """
     # List comprehension: for each combo of stimuli and conditions make a GSR object and get the data
-    data = [GnwSimResults('{}/{}/'.format(path, ss), net_name, cc, sim_suffix='dream4_timeseries.tsv',
-                          perturb_suffix="dream4_timeseries_perturbations.tsv", censor_times=times).data
-            for ss, cc in it.product(stimuli, conditions)]
+    df_list = []
+    for ss, cc in it.product(stimuli, conditions):
+        c_df = GnwSimResults('{}/{}/'.format(path, ss), net_name, cc, sim_suffix='dream4_timeseries.tsv',
+                                   perturb_suffix="dream4_timeseries_perturbations.tsv", censor_times=times).data
+        if ss == 'deactivating':
+            c_df.index = c_df.index.set_levels(-c_df.index.levels[c_df.index.names.index('perturbation')],
+                                               'perturbation')
+        df_list.append(c_df)
 
     # Concatenate into one dataframe
-    data = pd.concat(data)
+    insilico_data = pd.concat(df_list)
 
-    return data
-
-    # Old code
-    data = pd.DataFrame()
-    for stim in ['activating', 'deactivating']:
-        for c in conditions:
-            ts_file = '{bd}/{s}/{c}_sim_anon/Yeast-100_anon_{c}_dream4_timeseries.tsv'.format(bd=data_dir, c=c, s=stim)
-            if stim == 'deactivating':
-                new_data = get_data(ts_file, c, n_timeseries, reps, -p_labels, t=times)
-                # Don't add the 0 perturbation for deactiving, as it is redundant
-                new_data.drop(0, level='perturb', inplace=True)
-            else:
-                new_data = get_data(ts_file, c, n_timeseries, reps, p_labels, t=times)
-            data = pd.concat([data, new_data])
-    data.sort_index(inplace=True)
-    data.index.rename('time', 3, inplace=True)
-
-    df = pd.read_csv(path, sep='\t')
-    df['condition'] = c
-    times = sorted(list(set(df['Time'].values)))
-
-    # For safety
-    if not n_timeseries.is_integer():
-        raise ValueError('Number of time points for each replicate is not the same')
-
-    p_rep_list = np.array(list(range(reps)) * int(n_timeseries))
-    ts_p_index = np.ceil((df.index.values + 1) / len(times)).astype(int) - 1
-    ts_rep_list = p_rep_list[ts_p_index]
-    ts_p_list = perturbation_labels[ts_p_index]
-
-    df['perturb'] = ts_p_list
-    df['replicate'] = ts_rep_list
-
-    idx = pd.IndexSlice
-    full_data = df.set_index(['condition', 'replicate', 'perturb', 'Time']).sort_index()
-
-    if t is None:
-        t = full_data.index.levels[full_data.index.names.index('Time')].values
-
-    return full_data.loc[idx[:, :, :, t], :].copy()
+    return insilico_data.sort_index()
 
 
 def load_data(path, bg_shift=True, **kwargs):
@@ -340,11 +315,17 @@ def get_sim_data(sim_tuple, directory, condition='ki', times=None):
     return series
 
 if __name__ == '__main__':
+    # Options
     pd.set_option('display.width', 250)
-    override = False    # Rerun certain parts of the analysis
-    ### TRAINING
+    override = True    # Rerun certain parts of the analysis
+    plot_mean_variance = False
 
-    ## Load the data
+    """
+    ===================================
+    ========== Load the data ==========
+    ===================================
+    """
+
     # Set project parameters
     t = [0, 15, 30, 60, 120, 240, 480]
     conditions = ['ko', 'wt', 'ki']
@@ -352,7 +333,6 @@ if __name__ == '__main__':
     reps = 3
     project_name = 'insilico_strongly_connected_2'
     data_dir = '../data/insilico/strongly_connected_2/'
-
 
     # Keep track of the gene names
     gene_names = pd.read_csv("{}gene_anonymization.csv".format(data_dir), header=None, index_col=0)
@@ -368,26 +348,39 @@ if __name__ == '__main__':
     df, dg = tsv_to_dg("{}Yeast-100_anon_goldstandard_signed.tsv".format(data_dir))
 
     data = load_insilico_data(data_dir, conditions, stimuli, 'Yeast-100_anon', times=t)
-    sys.exit()
 
     idx = pd.IndexSlice
     perturb = 1
-    raw = data.loc[idx[:, :, perturb, :], :].T
-    contrast = 'ko-wt'
-    prefix = prefix = "{}/{}_{}_".format(project_name, project_name, contrast)
+    raw = data.loc[idx[:, :, perturb, :], :].T      # type: pd.DataFrame
+    # Set names appropriately
+    raw.columns.set_names(['replicate', 'perturb', 'time'], [1, 2, 3], inplace=True)
 
     # Mean-variance plot
-    # plt.plot(raw.mean(axis=1), raw.std(axis=1), '.')
-    # plt.show()
+    if plot_mean_variance:
+        plt.plot(raw.mean(axis=1), raw.std(axis=1), '.')
+        plt.xlabel('Mean expression')
+        plt.ylabel('Expression std')
+        plt.title('Heteroskedasticity')
+        plt.tight_layout()
+        plt.show()
+
+    """
+    ===================================
+    ============ TRAINING =============
+    ===================================
+    """
+    contrast = 'ko-wt'
+    prefix = prefix = "{}/{}_{}_".format(project_name, project_name, contrast) # For saving intermediate data
 
     try:
         dea = pd.read_pickle("{}dea.pkl".format(prefix))  # type: DEAnalysis
     except:
-        dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=False, log2=True)
+        dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=False)
 
     if override:
         dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=False, log2=True)
 
+    sys.exit()
     filtered_data = dea.data.loc[:, contrast.split('-')]
     der = dea.results[contrast]
 
@@ -416,7 +409,11 @@ if __name__ == '__main__':
     match.set_index(['id', 'perturbation', 'gene'], inplace=True)
     match.sort_values('mean', ascending=False, inplace=True)
 
-    ### TESTING
+    """
+    ====================================
+    ============= TESTING ==============
+    ====================================
+    """
     true_prefix = prefix.replace('ko', 'ki')
     contrast = contrast.replace('ko', 'ki')
     try:
