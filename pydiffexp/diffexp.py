@@ -363,6 +363,7 @@ class DEAnalysis(object):
         self.decide = None                  # type: pd.DataFrame
         self.db = None                      # type: pd.DataFrame
         self.log2 = log2                    # type: bool
+        self.log2_data = None               # type: pd.DataFrame
 
         if df is not None:
             # Set the data
@@ -664,6 +665,10 @@ class DEAnalysis(object):
             if np.sum(np.isinf(data.values)) > 0:
                 warnings.warn("infs detected during log expression transformation. Setting inf values to zero.")
                 data.replace([np.inf, -np.inf], 0, inplace=True)
+
+            # Save the new log2 data
+            self.log2_data = data
+
         r_matrix = rh.pydf_to_rmat(data)
         r_matrix.rownames = robjects.StrVector(genes)
         r_matrix.colnames = robjects.StrVector(self.labels)

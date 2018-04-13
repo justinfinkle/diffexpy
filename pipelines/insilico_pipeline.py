@@ -317,7 +317,7 @@ def get_sim_data(sim_tuple, directory, condition='ki', times=None):
 if __name__ == '__main__':
     # Options
     pd.set_option('display.width', 250)
-    override = True    # Rerun certain parts of the analysis
+    override = True   # Rerun certain parts of the analysis
     plot_mean_variance = False
 
     """
@@ -374,17 +374,18 @@ if __name__ == '__main__':
 
     try:
         dea = pd.read_pickle("{}dea.pkl".format(prefix))  # type: DEAnalysis
+        scores = pd.read_pickle("{}dde.pkl".format(prefix))
     except:
         dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=False)
 
     if override:
-        dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=False, log2=True)
+        dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=False)
 
-    sys.exit()
-    filtered_data = dea.data.loc[:, contrast.split('-')]
+    filtered_data = dea.log2_data.loc[:, contrast.split('-')]
     der = dea.results[contrast]
+    print(filtered_data)
+    sys.exit()
 
-    scores = pd.read_pickle("{}dde.pkl".format(prefix))
 
     dde_genes = filter_dde(scores, thresh=2).sort_values('score', ascending=False)
     dde_genes.sort_values('score', ascending=False, inplace=True)
