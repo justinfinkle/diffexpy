@@ -82,9 +82,9 @@ if __name__ == '__main__':
         ko_tree.write('{}_ko.xml'.format(save_str))
         ki_tree = net.tree.make_ki_sbml(ko_gene)
         ki_tree.write("{}_ki.xml".format(save_str))
-        wt_sim_path = cur_path + '/wt_sim_anon/'
-        ko_sim_path = cur_path + '/ko_sim_anon/'
-        ki_sim_path = cur_path + '/ki_sim_anon/'
+        wt_sim_path = cur_path + '/wt_sim/'
+        ko_sim_path = cur_path + '/ko_sim/'
+        ki_sim_path = cur_path + '/ki_sim/'
         mk_ch_dir(wt_sim_path, ch=False)
         mk_ch_dir(ko_sim_path, ch=False)
         mk_ch_dir(ki_sim_path, ch=False)
