@@ -661,6 +661,9 @@ class DEAnalysis(object):
             if np.sum(np.isnan(data.values)) > 0:
                 warnings.warn("NaNs detected during log expression transformation. Setting NaN values to zero.")
                 data = np.nan_to_num(data)
+            if np.sum(np.isinf(data.values)) > 0:
+                warnings.warn("infs detected during log expression transformation. Setting inf values to zero.")
+                data.replace([np.inf, -np.inf], 0, inplace=True)
         r_matrix = rh.pydf_to_rmat(data)
         r_matrix.rownames = robjects.StrVector(genes)
         r_matrix.colnames = robjects.StrVector(self.labels)
