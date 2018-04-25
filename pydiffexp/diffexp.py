@@ -657,17 +657,17 @@ class DEAnalysis(object):
             # Log transform expression and correct values if needed
             if log2:
                 data = np.log2(self.data)
+                # Save the new log2 data
+                self.log2_data = data
             else:
                 data = self.data
+
             if np.sum(np.isnan(data.values)) > 0:
                 warnings.warn("NaNs detected during log expression transformation. Setting NaN values to zero.")
                 data = np.nan_to_num(data)
             if np.sum(np.isinf(data.values)) > 0:
                 warnings.warn("infs detected during log expression transformation. Setting inf values to zero.")
                 data.replace([np.inf, -np.inf], 0, inplace=True)
-
-            # Save the new log2 data
-            self.log2_data = data
 
         r_matrix = rh.pydf_to_rmat(data)
         r_matrix.rownames = robjects.StrVector(genes)
