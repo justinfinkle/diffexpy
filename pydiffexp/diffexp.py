@@ -1,3 +1,4 @@
+import ast
 import itertools
 import os
 import sys
@@ -26,6 +27,18 @@ stats = importr('stats')
 null = robjects.r("NULL")
 
 
+def cluster_discrete(df) -> pd.DataFrame:
+    """
+    Cluster trajectories into tuples that can be easily counted
+    :param df: DataFrame; expected to come from decide_tests
+    :return:
+    """
+    clusters = [str(tuple(gene)) for gene in df.values]
+    cluster_df = pd.DataFrame(clusters, index=df.index, columns=['Cluster'])
+
+    return cluster_df
+
+
 def cluster_to_array(cluster: str):
     """
     Converts a string of DE cluster values to an integer array
@@ -43,7 +56,20 @@ def get_scores(grouped_df, de_df, weighted_df):
     :param weighted_df: weighted dataframe
     :return: df
     """
-    scores = pd.DataFrame(grouped_df.apply(group_scores, de_df, weighted_df))
+    # If there is only one group it needs to be setup differently
+    if len(grouped_df.groups.keys()) == 1:
+        # Extract group as a dataframe
+        single_cluster = list(grouped_df.groups.keys())[0]
+        g = grouped_df.get_group(single_cluster)
+        g.name = single_cluster
+        scores = group_scores(g, de_df, weighted_df)
+
+        # Format to match expected output of apply
+        scores = scores.reset_index()
+        scores.insert(0, 'Cluster', single_cluster)
+        scores.set_index(['Cluster', 'index'], inplace=True)
+    else:
+        scores = pd.DataFrame(grouped_df.apply(group_scores, de_df, weighted_df))
     if 'gene' not in scores.index.names:
         scores.index.set_names('gene', level=1, inplace=True)
     scores = scores.reset_index().sort_values(['Cluster', 'score'], ascending=[False, False]).set_index('gene')
@@ -51,24 +77,33 @@ def get_scores(grouped_df, de_df, weighted_df):
     return scores
 
 
-def group_scores(cluster, de_df, gene_info):
+def group_scores(cluster, de: pd.DataFrame, weighted_de: pd.DataFrame):
     """
     Score how well each trajectory matches the cluster
     :param cluster:
-    :param de_df:
-    :param gene_info:
+    :param de:
+    :param weighted_de:
     :return: series
     """
     # Get the scores for each trajectory based on the assumed cluster
-    expected = cluster_to_array(cluster.name)
-    clus_lfc = gene_info.loc[cluster.index]
-    penalty = -np.abs(np.sign(clus_lfc).values - expected)
-    scores = np.abs(clus_lfc).values * penalty + np.abs(clus_lfc).values * (penalty == 0)  # type: np.ndarray
+    expected = np.array(eval(cluster.name))
+    clus_de = de.loc[cluster.index]
+    clus_wde = weighted_de.loc[cluster.index]
+    diff = clus_de - clus_wde
+    correct_de = ~np.abs(np.sign(clus_wde).values - expected).astype(bool)
+    penalty = (correct_de*diff + (~correct_de)*clus_wde).abs().sum(axis=1)
+    score = (correct_de*clus_wde + (~correct_de)*diff).abs().sum(axis=1)
+
+    # scores = np.abs(clus_wde).values * penalty + np.abs(clus_wde).values * (penalty == 0)  # type: np.ndarray
 
     # Calculate fraction of the lfc that was retained
-    score_frac = np.sum(scores, axis=1)/np.sum(np.abs(de_df.loc[cluster.index]).values, axis=1)
+    score_frac = (score-penalty)/clus_de.abs().sum(axis=1)
+    # score_frac = np.sum(scores, axis=1)/np.sum(np.abs(de_df.loc[cluster.index]).values, axis=1)
+    # score_frac = 1 - (de.loc[cluster.index] - clus_wde).abs().sum(axis=1) / de.loc[cluster.index].abs().sum(axis=1)
+    score_frac.name = 'score'
 
-    return pd.Series(data=score_frac, index=cluster.index, name='score')
+    return score_frac
+    # return pd.Series(data=score_frac, index=cluster.index, name='score')
 
 
 class MArrayLM(object):
@@ -145,7 +180,7 @@ class DEResults(MArrayLM):
                                 'p_value': 0.05, 'lfc': 0}                              # type: dict
         self.continuous = self.top_table(**self.continuous_kwargs)                      # type: pd.DataFrame
         self.discrete = self.decide_tests(**self.discrete_kwargs)                       # type: pd.DataFrame
-        self.discrete_clusters = self.cluster_discrete(self.discrete)                   # type: pd.DataFrame
+        self.discrete_clusters = cluster_discrete(self.discrete)                        # type: pd.DataFrame
         self.cluster_count = self.count_clusters(self.discrete_clusters)                # type: pd.DataFrame
         self.all_results = self.aggregate_results()                                     # type: pd.DataFrame
 
@@ -194,18 +229,6 @@ class DEResults(MArrayLM):
             pass
 
         return cluster_count
-
-    @staticmethod
-    def cluster_discrete(df) -> pd.DataFrame:
-        """
-        Cluster trajectories into tuples that can be easily counted
-        :param df: DataFrame; expected to come from decide_tests
-        :return:
-        """
-        clusters = [str(tuple(gene)) for gene in df.values]
-        cluster_df = pd.DataFrame(clusters, index=df.index, columns=['Cluster'])
-
-        return cluster_df
 
     def top_table(self, use_fstat=None, p=1, n='inf', **kwargs) -> pd.DataFrame:
         """
@@ -286,12 +309,19 @@ class DEResults(MArrayLM):
         df = rh.rvect_to_py(decide).astype(int)
         return df
 
-    def score_clustering(self):
+    def score_clustering(self, grouped=None, ind_p=0.05):
+        # Calculate the weighted log fold change as lfc*(1-pvalue) at each time point
         weighted_lfc = (1 - self.p_value) * self.continuous.loc[self.p_value.index, self.p_value.columns]
-        grouped = self.cluster_discrete(self.decide_tests(p_value=0.05)).groupby('Cluster')
+
+        # Group genes by clusters
+        if grouped is None:
+            grouped = cluster_discrete(self.decide_tests(p_value=ind_p)).groupby('Cluster')
+
+        # Score the clustering
         scores = get_scores(grouped, self.continuous.loc[:, self.p_value.columns], weighted_lfc).sort_index()
         scores['score'] = scores['score']*(1-self.continuous['adj_pval']).sort_index().values
         scores.sort_values('score', ascending=False, inplace=True)
+
         return scores
 
 
@@ -319,6 +349,7 @@ class DEAnalysis(object):
         self.conditions = None              # type: list
         self.replicates = None              # type: list
         self.voom = voom                    # type: bool
+        self.voom_data = None               # type: pd.DataFrame
         self.default_contrasts = None
         self.timeseries = False             # type: bool
         self.samples = None                 # type: list
@@ -332,6 +363,7 @@ class DEAnalysis(object):
         self.decide = None                  # type: pd.DataFrame
         self.db = None                      # type: pd.DataFrame
         self.log2 = log2                    # type: bool
+        self.log2_data = None               # type: pd.DataFrame
 
         if df is not None:
             # Set the data
@@ -616,15 +648,27 @@ class DEAnalysis(object):
             # plt.show()
             # sys.exit()
             data = voom_results['E']
+
+            # Set the voom data
+            self.voom_data = voom_results['E'].copy()
+            cols_as_tup = list(map(ast.literal_eval, self.voom_data.columns.values))
+            self.voom_data.columns = pd.MultiIndex.from_tuples(cols_as_tup, names=self.data.columns.names)
         else:
             # Log transform expression and correct values if needed
             if log2:
                 data = np.log2(self.data)
+                # Save the new log2 data
+                self.log2_data = data
             else:
                 data = self.data
+
             if np.sum(np.isnan(data.values)) > 0:
                 warnings.warn("NaNs detected during log expression transformation. Setting NaN values to zero.")
                 data = np.nan_to_num(data)
+            if np.sum(np.isinf(data.values)) > 0:
+                warnings.warn("infs detected during log expression transformation. Setting inf values to zero.")
+                data.replace([np.inf, -np.inf], 0, inplace=True)
+
         r_matrix = rh.pydf_to_rmat(data)
         r_matrix.rownames = robjects.StrVector(genes)
         r_matrix.colnames = robjects.StrVector(self.labels)
@@ -824,7 +868,7 @@ class DEAnalysis(object):
         db.sort_index(axis=1, inplace=True, level=0)
         return db
 
-    def to_pickle(self, path):
+    def to_pickle(self, path, force_save=False):
         # Note, this is taken directly from pandas generic.py which defines the method in class NDFrame
         """
         Pickle (serialize) object to input file path
@@ -839,7 +883,7 @@ class DEAnalysis(object):
             sys.exit('The directory entered to save the pickle to, "%s", does not exist' % os.path.dirname(path))
 
         # If the pickle path exists, ask if the user wants to save over it
-        if os.path.isfile(path):
+        if os.path.isfile(path) and not force_save:
             print("Pickle file to save: ", path)
             answer = input('The proposed pickle file already exists. Would you like to replace it [y/n]?')
             if answer != 'y':

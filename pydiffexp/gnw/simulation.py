@@ -30,6 +30,7 @@ def mk_ch_dir(path, ch=True):
         pass
     if ch:
         os.chdir(path)
+    return path
 
 
 def module_logic_combos(n_in_edges=2):
@@ -46,7 +47,7 @@ def module_logic_combos(n_in_edges=2):
     print(module_logic)
 
 
-def insert_element(e: eT.Element, parent, position, level=None):
+def insert_element(e: eT.Element, parent, position, level=None, tail='\t'):
     """
     Insert an XML element into another
     :param e:
@@ -56,7 +57,7 @@ def insert_element(e: eT.Element, parent, position, level=None):
     :return:
     """
     if level is not None:
-        e.tail = '\n' + '\t'*level
+        e.tail = '\n' + tail*level
     parent.insert(position, e)
 
 
@@ -213,7 +214,7 @@ class SBMLReaction(object):
         """
         return tuple(self.element.get('id').split('_'))
 
-    def update_state(self, new_name=None):
+    def update_state(self, new_name=None, recheck_linear=True):
         """
         Update the state of the reaction
         :param new_name:
@@ -221,7 +222,10 @@ class SBMLReaction(object):
         """
         self.levels = get_e_levels(self.element, level=self.base_level)
         self.alphas = self.get_alphas()
-        self.linear, self.n_modules = self.is_linear()
+
+        # Recheck linearity. Will not trigger when updating after adding an input
+        if recheck_linear:
+            self.linear, self.n_modules = self.is_linear()
         if new_name is not None:
             self._set_name(new_name)
         self.name = self._get_name()
@@ -284,7 +288,7 @@ class SBMLReaction(object):
         :return:
         """
         # Get species in proper order
-        return tuple([c.get('species') for c in self.element[2]])
+        return tuple([c.get('species') for c in self.element[2] if c.get('species') is not None])
 
     def _switch_type(self):
         """
@@ -316,7 +320,7 @@ class SBMLReaction(object):
             self.update_state(new_name)
         return
 
-    def _modify_params(self, modules):
+    def _modify_params(self, modules, add_k=False, add_n=False):
         """
         Modify additional parameters other than alpha values
         :param num_modules:
@@ -359,26 +363,39 @@ class SBMLReaction(object):
                 module_param = ['bindsAsComplex_{}'.format(mod_num),
                                 'numActivators_{}'.format(mod_num),
                                 'numDeactivators_{}'.format(mod_num)]
+                if add_k:
+                    module_param.append('k_{}'.format(mod_num))
+                if add_n:
+                    module_param.append('n_{}'.format(mod_num))
                 for mod_param in module_param:
                     p = param_list.find("*[@name='{}']".format(mod_param))
                     if p is not None:
-
                         # Modify values
                         if 'bindsAsComplex' in mod_param:
                             p.set('value', str(binds_as_complex[mod_num - 1]))
                         elif 'numActivators' in mod_param:
                             p.set('value', str(len(modules[mod_num - 1].activators)))
-                        else:
+                        elif 'numDeactivators' in mod_param:
                             p.set('value', str(len(modules[mod_num - 1].deactivators)))
                     else:
-
                         # Make a new element
                         if 'bindsAsComplex' in mod_param:
                             value = binds_as_complex[mod_num - 1]
                         elif 'numActivators' in mod_param:
                             value = len(modules[mod_num - 1].activators)
-                        else:
+                        elif 'numDeactivators' in mod_param:
                             value = len(modules[mod_num - 1].deactivators)
+
+                        elif 'k_' in mod_param:
+                            # value = np.random.uniform(0.01, 1)
+                            # inputs nodes should all have low k values for fast reactions
+                            value = 0.01
+
+                        elif 'n_' in mod_param:
+                            # value = self.random_parameter_gaussian(1, 10, 2, 2).rvs(1)[0]
+                            # lets prevent an hill coefficients
+                            value = 1
+
                         new_element = eT.Element('parameter', {'name': mod_param,
                                                                'id': mod_param,
                                                                'value': str(value)})
@@ -569,6 +586,45 @@ class SBMLReaction(object):
 
         return alpha
 
+    def _add_species(self, n):
+        if self.n_inputs==0:
+            new_modifiers = eT.Element('listOfModifiers')
+            insert_element(new_modifiers, self.element, 2, self.base_level)
+            self.levels = get_e_levels(self.element, level=self.base_level)
+        modifiers = self.element[2]
+        new_species = eT.Element('modifierSpeciesReference', {'species': n})
+        insert_element(new_species, modifiers, self.n_inputs, self.levels[modifiers]+1)
+        self.species = self.get_species_order()
+        self.n_inputs = len(self.species)
+        return
+
+    def add_input(self, source, sign):
+        """
+        Modify the reaction in place
+        :param source:
+        :param sign:
+        :return:
+        """
+        # Add the species to the reaction
+        self._add_species(source)
+
+        # Add it to the edge dataframe
+        self.edge_df = self.edge_df.append(pd.Series([source, self.node, sign], index=self.edge_df.columns.values,
+                                                     name=(source, self.node)))
+
+        # Keep track of the sign
+        edge_signs = self.edge_df.loc[[(s, self.node) for s in self.species], 'value'].values
+        edges = [[(str(idx + 1), sign)] for idx, sign in enumerate(edge_signs)]
+        reg_mods = [RegulatoryModule(self.node, e) for e in edges]
+        enhancer, rm_str = zip(*[(rm.enhancer, rm.to_str()) for rm in reg_mods])
+        new_alphas = self.random_alphas(np.array(enhancer))
+        new_name = "{}_synthesis: {}".format(self.node, (" + ".join(rm_str)))
+        self._modify_params(reg_mods, add_k=True, add_n=True)
+        self._modify_alphas(new_alphas)
+
+        # Change state
+        self.update_state(new_name)
+
 
 class SBMLTree(eT.ElementTree):
     """
@@ -621,8 +677,137 @@ class SBMLTree(eT.ElementTree):
             raise ValueError('No SBML loaded') from e
         return new_tree
 
+    def make_ki_sbml(self, node):
+        """
+        Make a knockin version of the dynamical model. Remove any regulatores of the target node synthesis reaction
+
+        Note: this is extremely dependent on the structure of the SBML (XML).
+        :param node: str; node to knockout
+        :return:
+        """
+        new_tree = self.copy()
+        try:
+            target_reaction = node + '_synthesis'
+            for v in new_tree.iterfind("*//*[@id='{}']".format(target_reaction)):
+                v.set('name', "{}: no inputs".format(target_reaction))
+
+                # Remove list of modifiers
+                try:
+                    mods = [c for c in v.iter() if 'listOfModifiers' in c.tag][0]
+                    v.remove(mods)
+                # If there is no list of modifiers, no need to remove
+                except IndexError:
+                    pass
+
+                # Modify kinetics
+                param_list = [c for c in v.iter() if 'kineticLaw' in c.tag][0][0]
+                delete_list = []
+                for param in param_list:
+                    # Make list of elements to delete
+                    name = param.get('name')
+                    if "bindsAs" in name or "numAct" in name or "numDeact" in name or "k_" in name or "n_" in name:
+                        delete_list.append(param)
+                    elif "a_" in name:
+                        # Set the only alpha parameter
+                        if name == 'a_0':
+                            param.set('value', "1.0")
+                        # Other alphas will be deleted
+                        else:
+                            delete_list.append(param)
+
+                # Delete elements
+                for d in delete_list:
+                    param_list.remove(d)
+
+        except AttributeError as e:
+            raise ValueError('No SBML loaded') from e
+        return new_tree
+
     def copy(self):
         return SBMLTree(copy.deepcopy(self.root), self.net_df.copy())
+
+    def get_element(self, tag):
+        e = [c for c in self.root.iter() if tag in c.tag][0]  # type: eT.Element
+        return e
+
+    def update(self):
+        self.levels = get_e_levels(self.root)
+        self.nodes = self.get_nodes()
+
+    def add_node(self, name):
+        # Find <listOfSpecies> and insert a new node
+        species_list = self.get_element('listOfSpecies')
+        new_species = eT.Element('species', {'id': name, 'name': name, 'compartment': "cell"})
+
+        # Subtract 1 from the parent tree level for correct offset
+        insert_element(new_species, species_list, 0, level=self.levels[species_list]+2, tail='  ')
+        self.nodes = self.get_nodes()
+        self.update()
+
+        self.add_reaction('{}_synthesis'.format(name), self.get_element('listOfReactions'),
+                          {'listOfReactants': '_void_',
+                           'listOfProducts': name,
+                           'kineticLaw': {"max":"0.023784629963523155",
+                                           "deltaProtein": "0.03952256028912611",
+                                           "maxTranslation": "0.03952256028912611",
+                                           "a_0": "0.0"}})
+        self.add_reaction('{}_degradation'.format(name), self.get_element('listOfReactions'),
+                          {'listOfReactants': name,
+                           'listOfProducts': '_void_',
+                           'kineticLaw': {"delta": '0.023784629963523155'}},
+                          synth=False)
+        return
+
+    def add_reaction(self, name, parent, properties, synth=True):
+        lists = ['listOfReactants', 'listOfProducts', 'kineticLaw']
+        append_str = ': no inputs' if synth else ''
+
+        # Add reaction
+        new_rxn = eT.Element('reaction', {'id': name, 'name': "{}{}".format(name, append_str), 'reversible': "false"})
+        insert_element(new_rxn, parent, 0, self.levels[parent] + 2, tail='  ')
+        self.update()
+
+        for l in lists[::-1]:
+            new_list = eT.Element(l)
+            insert_element(new_list, new_rxn, 0, self.levels[new_rxn] + 2, tail='  ')
+            self.update()
+            if isinstance(properties[l], str):
+                species_ref = eT.Element('speciesReference', {'species': properties[l]})
+                insert_element(species_ref, new_list, 0, self.levels[new_list] + 2, tail='  ')
+                self.update()
+            else:
+                param_list = eT.Element('listOfParameters')
+                insert_element(param_list, new_list, 0, self.levels[new_list] + 2, tail='  ')
+                self.update()
+                for k,v in properties[l].items():
+                    param = eT.Element('parameter', {'id': k, 'name': k, 'value':v})
+                    insert_element(param, param_list, 0, self.levels[param_list] + 2, tail='  ')
+                    self.update()
+
+        self.update()
+        return
+
+    def add_input(self, node='u', target='x', sign='+', **kwargs):
+        """
+        Set the input node base expression. Default is to 0. Modifies tree in place
+        Make sure it linearly impacts the target gene expression
+        :param node:
+        :param base_exp:
+        :return:
+        """
+        target_rxn = self.rxn["{}_synthesis".format(target)]
+        target_rxn.add_input(node, sign)
+        self.add_node(node)
+
+        # input_reaction = "{}_synthesis".format(node)
+        # for v in self.iterfind("*//*[@id='{}']".format(input_reaction)):
+        #     for param in v.iterfind("*//*[@name='a_0']"):
+        #         param.set('value', str(base_exp))
+        #
+        # target_reaction = self.get_rxn("{}_synthesis".format(target))["{}_synthesis".format(target)]
+        # target_reaction.set_input(node)
+
+        return target_rxn
 
 
 class GnwNetwork(nx.DiGraph):
@@ -794,6 +979,7 @@ class GnwNetwork(nx.DiGraph):
         if add_rxn:
             self.add_rxn()
 
+    def reorganize_perturbs(self):
         # Reorder perturbations appropriately
         self.perturbations = self.perturbations[list(self.tree.nodes)]  # type: pd.DataFrame
 
@@ -870,6 +1056,29 @@ class GnwNetwork(nx.DiGraph):
         # The position must match the order
         position = tree.nodes.index(new_rxn.node)
         insert_element(new_rxn.element, rxn_list, 2*position)
+
+    def add_input(self, source='u', target='x', sign='+', **kwargs):
+        """
+        Add the input node to force the system in response. Default source name is 'u', and target is 'x'.
+
+        :param source:
+        :param target:
+        :param sign:
+        :param kwargs:
+        :return:
+        """
+        kwargs.setdefault("base_exp", "0.0")
+        kwargs.setdefault('max', "0.024298881755926153")
+        kwargs.setdefault("deltaProtein", "0.018382137960890884")
+        kwargs.setdefault("maxTranslation", "0.018382137960890884")
+        kwargs.setdefault("delta", "0.024298881755926153")
+
+        # Add it to the network
+        # Add it to the dataframe
+
+        # Add it to the tree
+        new_rxn = self.tree.add_input(source, target, sign, **kwargs)
+        self.swap_rxn(self.tree, new_rxn)
 
 
 

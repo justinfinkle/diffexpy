@@ -90,7 +90,7 @@ def draw_results(data: pd.DataFrame, perturb, titles, times=None, samey=True, g=
             if samey:
                 ax.set_ylim([0, y_max])
             # ax.set_xlabel('')
-            ax.set_title(titles[ii-1])
+            ax.set_title(nodes[ii-1])
             if ii > 1:
                 ax.get_yaxis().set_visible(False)
 
