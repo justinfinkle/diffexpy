@@ -121,14 +121,15 @@ if __name__ == '__main__':
     net_name = 'Yeast-100_anon'
     ko_gene = gene_mapping.loc['YMR016C', 1]
     stim_gene =gene_mapping.loc['YKL062W', 1]
+    print(ko_gene, stim_gene)
     reps = 3
     perturb = 1
 
     # Set script run parameters
     n_p = 100           # Number of permutes
     p_path = "intermediate_data/{}_permutes/".format(base_name)    # Path to save and retrieve permutes
-    save_p = True       # Save permutes for future testing?
-    fit_data = True     # Run analysis?
+    save_p = False     # Save permutes for future testing?
+    fit_data = False     # Run analysis?
     analyze_p = True     # Analyze permuted data?
 
     # Organize perturbations

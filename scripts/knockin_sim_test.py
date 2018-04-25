@@ -1,10 +1,5 @@
-import os
-import sys
-import pickle
-import multiprocessing as mp
-
 import pandas as pd
-from pydiffexp.gnw import GnwNetwork, tsv_to_dg, mk_ch_dir, simulate
+from pydiffexp.gnw import tsv_to_dg
 
 jar_loc = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/gnw/gnw-3.1.2b.jar'
 base_path = "../data/motif_library/gnw_networks/"
@@ -19,14 +14,6 @@ no_ki_effect_net = []
 for net in range(n_nets):
     base_dir = "{}{}/".format(base_path, net)
     df, dg = tsv_to_dg("{}{}_goldstandard_signed.tsv".format(base_dir, net))
-    if dg.in_degree("G") == 0:
-        count+=1
-        no_ki_effect_net.append(net)
-print(count)
-print(no_ki_effect_net)
-
-with open("{}no_ki_effect_networks.pickle".format(base_path), "wb") as output_file:
-    pickle.dump(no_ki_effect_net, output_file)
 
 #     for stim in ['activating', 'deactivating']:
 #         cur_dir = "{}{}/".format(base_dir, stim)

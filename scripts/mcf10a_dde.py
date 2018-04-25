@@ -20,7 +20,7 @@ interesting = scores.loc[scores.Cluster.apply(ast.literal_eval).apply(set).apply
 c = (interesting[interesting.Cluster=='(0, 0, 0, 0, -1, -1)'].sort_values('score', ascending=False))
 print(c)
 dep = DEPlot()
-dep.tsplot(dea.data.loc["ENSG00000186187", ['pten', 'wt']], legend=False)
+dep.tsplot(dea.data.loc["ENSG00000186187", ['ko', 'wt']], legend=False)
 plt.title('ZNRF1')
 plt.tight_layout()
 plt.show()
