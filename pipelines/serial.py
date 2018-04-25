@@ -1,3 +1,4 @@
+import ast
 import os
 import shutil
 import sys
@@ -5,9 +6,13 @@ import tarfile
 
 import numpy as np
 import pandas as pd
-from pydiffexp import DEAnalysis, DEResults
-from pydiffexp.gnw import mk_ch_dir, GnwNetResults
+import seaborn as sns
+from pydiffexp import DEAnalysis, DEResults, DEPlot, get_scores, cluster_discrete, pairwise_corr
+from pydiffexp.gnw import mk_ch_dir, GnwNetResults, GnwSimResults, draw_results, get_graph
 from scipy import stats
+from scipy.spatial.distance import hamming
+import matplotlib.pyplot as plt
+import networkx as nx
 
 
 def load_data(path, bg_shift=True, **kwargs):
@@ -154,7 +159,98 @@ def compile_sim(sim_dir, times, save_path=None, **kwargs):
     return sim_results
 
 
-def display():
+def filter_dde(df, col='Cluster', thresh=2):
+    """
+    Filter out dde genes that are "uninteresting". They have fewer unique discrete labels than the threshold
+    e.g. thresh=2 and Cluster = (1,1,1,1) will have only 1 unique label, and will be filtered out.
+    :param df:
+    :param col:
+    :param thresh:
+    :return:
+    """
+    df = df.loc[df[col].apply(ast.literal_eval).apply(set).apply(len) >= thresh]
+    return df
+
+
+def discretize_sim(sim_data: pd.DataFrame, p=0.05, filter_interesting=True, fillna=True):
+
+    if fillna:
+        sim_data.fillna(0, inplace=True)
+
+    weighted_lfc = ((1 - sim_data.loc[:, 'lfc_pvalue']) * sim_data.loc[:, 'lfc'])
+    discrete = sim_data.loc[:, 'lfc'].apply(np.sign).astype(int)
+    clusters = cluster_discrete((discrete * (sim_data.loc[:, 'lfc_pvalue'] < p)))
+    g = clusters.groupby('Cluster')
+    scores = get_scores(g, sim_data.loc[:, 'lfc'], weighted_lfc).sort_index()
+
+    if filter_interesting:
+        scores = filter_dde(scores)
+
+    # Reorganize the index to match the input one
+    scores.set_index(['x_perturbation', 'id'], append=True, inplace=True)
+    scores = scores.swaplevel(i='id', j='gene').sort_index()
+
+    return scores
+
+
+def correlate(experimental: pd.DataFrame, simulated: pd.DataFrame, sim_conditions, sim_node=None):
+    print('Computing pairwise')
+    gene_mean = experimental.groupby(level=['condition', 'time'], axis=1).mean()
+    gene_mean_grouped = gene_mean.groupby(level='condition', axis=1)
+    mean_z = gene_mean_grouped.transform(stats.zscore, ddof=1).fillna(0)
+
+    # Correlate zscored means for each gene with each node in every simulation
+    if sim_node is not None:
+        simulated = simulated[simulated.index.get_level_values('gene') == sim_node]
+    sim_means = simulated.loc[:, sim_conditions]
+    sim_mean_z = sim_means.groupby(level='stat', axis=1).transform(stats.zscore, ddof=1).fillna(0)
+
+    pcorr, p = pairwise_corr(sim_mean_z, mean_z, axis=1)
+    print('Done')
+    return pcorr, p
+
+
+def display_sim(network, perturbation, times, directory, exp_condition='ko', ctrl_condition='wt'):
+    data_dir = '{}/{}/'.format(directory, network)
+    network_structure = "{}{}_goldstandard_signed.tsv".format(data_dir, network)
+
+    ctrl_gsr = GnwSimResults(data_dir, network, ctrl_condition, sim_suffix='dream4_timeseries.tsv',
+                             perturb_suffix="dream4_timeseries_perturbations.tsv")
+    exp_gsr = GnwSimResults(data_dir, network, exp_condition, sim_suffix='dream4_timeseries.tsv',
+                            perturb_suffix="dream4_timeseries_perturbations.tsv")
+
+    data = pd.concat([ctrl_gsr.data, exp_gsr.data]).T
+    dg = get_graph(network_structure)
+    titles = ["x", "y", "PI3K"]
+    mapping = {'G': "PI3k"}
+    dg = nx.relabel_nodes(dg, mapping)
+    draw_results(data, perturbation, titles, times=times, g=dg)
+    plt.tight_layout()
+
+
+def match_to_gene(x, y, correlation, corrp):
+    matching_results = pd.DataFrame()
+    for gene, row in x.iterrows():
+        candidate_nets = y.loc[y.Cluster == row.Cluster]
+        cur_corr = correlation.loc[gene, candidate_nets.index]
+        cur_p = corrp.loc[gene, candidate_nets.index]
+        cur_corr.name = 'pearson_r'
+        cur_p.name = 'pearson_p'
+        ranking = pd.concat([candidate_nets, cur_corr, cur_p], axis=1)
+        ranking['mean'] = (ranking['score'] + ranking['pearson_r']) / 2
+        ranking = ranking.loc[ranking.index.get_level_values(2) == 'y']
+        ranking['true_gene'] = gene
+        matching_results = pd.concat([matching_results, ranking.reset_index()], ignore_index=True, join='inner')
+
+    return matching_results
+
+
+def clustering_hamming(x, y):
+    ham = [hamming(cluster, y[ii]) for ii, cluster in enumerate(x)]
+    return ham
+
+
+def display_gene():
     pass
 
 
@@ -165,21 +261,155 @@ if __name__ == '__main__':
     project_name = "GSE69822"
     contrast = 'ko-wt'
     prefix = "{}/{}_{}_".format(project_name, project_name, contrast)
+    times = [0, 15, 40, 90, 180, 300]
     raw = load_data('../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt')
     gene_map = pd.read_csv('../data/GSE69822/mcf10a_gene_names.csv', index_col=0)
     mk_ch_dir(project_name, ch=False)
 
     # Fit the data using a DEAnalysis object
-    dea = dde(raw, contrast, project_name, save_permute_data=False, calc_p=True, voom=True)
-    # dea = pd.read_pickle("{}dea.pkl".format(prefix))            # type: DEAnalysis
-    der = dea.results[contrast]                                 # type: DEResults
-    print(der.top_table().head())
+    # dea = dde(raw, contrast, project_name, save_permute_data=False, calc_p=False, voom=True)
+    scores = pd.read_pickle("{}dde.pkl".format(prefix))
+    dea = pd.read_pickle("{}dea.pkl".format(prefix))            # type: DEAnalysis
+    plt.plot(dea.voom_data.mean(axis=1), dea.voom_data.std(axis=1), '.')
+    plt.show()
     sys.exit()
+    der = dea.results[contrast]                                 # type: DEResults
 
     # Compile simulation results
-    # sim_stats = compile_sim('../data/motif_library/gnw_networks/', times=[0, 15, 40, 90, 180, 300],
+    # sim_stats = compile_sim('../data/motif_library/gnw_networks/', times=times,
     #                         save_path="{}sim_stats.pkl".format(prefix))
     sim_stats = pd.read_pickle("{}sim_stats.pkl".format(prefix))    # type: pd.DataFrame
 
+    # Discretize the simulation stats and cluster
+    sim_scores = discretize_sim(sim_stats)
+
+    # Filter out "uninteresting" genes.
+    dde_genes = filter_dde(scores)
+    dde_genes = dde_genes[dde_genes['p_value'] < 0.05].sort_values('score', ascending=False)
+    filtered_data = dea.voom_data.loc[dde_genes.index, contrast.split('-')]
+
+    # Heatmap of expression
+
+    # de_data = (der.top_table().iloc[:, :6])  # .multiply(der.p_value < p_thresh)
+    # sort_idx = dde_genes.sort_values(['Cluster', 'score'], ascending=False).index.values
+    # hm_data = de_data.loc[sort_idx]
+    # hm_data = stats.zscore(hm_data, ddof=1, axis=1)
+    # # hm_data = hm_data.divide(hm_data.abs().max(axis=1), axis=0)
+    #
+    # cmap = sns.diverging_palette(30, 260, s=80, l=55, as_cmap=True)
+    # plt.figure(figsize=(4, 8))
+    # sns.heatmap(hm_data, xticklabels=dea.times, yticklabels=False, cmap=cmap)
+    # plt.xticks(rotation=45)
+    # plt.title('PI3K KO DDE')
+    # plt.tight_layout()
+    # plt.show()
+    # sys.exit()
+
+    # Correlate genes with simulations
+    corr, p = correlate(filtered_data, sim_stats.loc[sim_scores.index], ['ko_mean', 'wt_mean'], sim_node='y')
+
+    # Combine score and correlations
+    match = match_to_gene(dde_genes, sim_scores, corr, p)
+    match.set_index(['id', 'x_perturbation', 'gene'], inplace=True)
+    matched_genes = list(set(match.true_gene))
+    unique_nets = list(set(match.index))
+
+    # Need to validate
+    true_prefix = prefix.replace('ko', 'ki')
+    contrast = contrast.replace('ko', 'ki')
+
+    # Compile simulation results
+    # sim_stats = compile_sim('../data/motif_library/gnw_networks/', times=times,
+    #                         save_path="{}sim_stats.pkl".format(true_prefix), experimental='ki')
+
+    # Calculate expected clusters
+    test_sim = pd.read_pickle("{}sim_stats.pkl".format(true_prefix))  # type: pd.DataFrame
+    test_scores = discretize_sim(test_sim, filter_interesting=False)
+    test_scores = test_scores.loc[match.index]
+    test_scores.columns = ['predicted_cluster', 'predicted_score']
+
+    true_scores = pd.read_pickle("{}dde.pkl".format(true_prefix))
+    true_dea = pd.read_pickle("{}dea.pkl".format(true_prefix))  # type: DEAnalysis
+    true_der = true_dea.results[contrast]  # type: DEResults
+
+    true_dde_genes = filter_dde(true_scores)
+    true_dde_genes = true_dde_genes[true_dde_genes['p_value'] < 0.05].sort_values('score', ascending=False)
+    true_filtered_data = true_dea.voom_data.loc[true_dde_genes.index, contrast.split('-')]
+
+    combined = pd.concat([match, test_scores], join='inner', axis=1)
+    matched_scores = true_scores.loc[match.true_gene].reset_index(drop=True)
+    matched_scores.columns = ['true_cluster', 'true_score', 'true_p_value']
+    all = pd.concat([combined.reset_index(), matched_scores], axis=1)
+    new_corr, new_p = correlate(true_dea.voom_data.loc[matched_genes, 'ki'], test_sim.loc[unique_nets], ['ki_mean'])
+    unstacked = new_corr.unstack().sort_index()
+    up = new_p.unstack().sort_index()
+    unstacked.name = 'pred_true_pearsonr'
+    up.name = 'pred_true_pearsonr_p'
+    all.set_index(['id', 'x_perturbation', 'gene', 'true_gene'], inplace=True)
+    all = pd.concat([all, unstacked.loc[all.index], up.loc[all.index]], axis=1)    # type: pd.DataFrame
+
+    # Ignore NaNs for now
+    # todo: figure out where there are nans
+    all = all[~all.isnull().any(axis=1)]
+    all['hamming'] = clustering_hamming(all['predicted_cluster'].apply(ast.literal_eval),
+                                        all['true_cluster'].apply(ast.literal_eval))
+
+    # all = filter_dde(all, 'predicted_cluster')
+    all['true_mean'] = (all['true_score'] + all['pred_true_pearsonr'])/2
+    all = all[(all['mean'] > 0) & (all['true_p_value'] < 0.05) & (all['true_mean'] > 0) & (all['predicted_score'] > 0)]
+
+    g = all.groupby(level=3)
+
+    idx = g['mean'].transform(max) == all['mean']
+    test = all[idx]
+    print(test)
+    sns.regplot('mean', 'true_mean', data=test)
+    print(stats.pearsonr(test['mean'], test['true_mean']))
+    plt.tight_layout()
+    plt.show()
+    sys.exit()
+    all.sort_values(['mean', 'hamming', 'predicted_score', 'pred_true_pearsonr'], ascending=[False, True, False, False],
+                    inplace=True)
+
+    print(all)
+    print(all.mean())
+    plt.hist(all.pred_true_pearsonr, bins=30)
+    plt.figure()
+    plt.plot(all['mean'], all['pred_true_pearsonr'], '.')
+    print(stats.pearsonr(all['mean'], all['pred_true_pearsonr']))
+    plt.figure()
+    plt.plot(all['mean'], all['hamming'], '.')
+
+    plt.figure()
+    plt.plot(all['mean'], all['true_mean'], '.')
+    print(stats.pearsonr(all['mean'], all['true_mean']))
+    plt.show()
+
+    sys.exit()
+
+
+    # grouped = match.groupby('true_gene')
+    # a = 0
+    # unique = 0
+    # for gene, data in grouped:
+    #     unique += 1
+    #     if gene in true_dde_genes.index:
+    #         print(data)
+    #         a += 1
+    # print(a)
+    # print(true_dde_genes.shape)
+    # print(unique)
+    # sys.exit()
+    # print(all)
+
+    dep = DEPlot()
+    dep.tsplot(dea.voom_data.loc['ENSG00000004799', contrast.replace('ki', 'ko').split('-')], legend=False)
+    plt.tight_layout()
+
+    dep.tsplot(true_dea.voom_data.loc['ENSG00000004799', contrast.split('-')], legend=False)
+    plt.tight_layout()
+
     # Display results
-    display()
+    display_sim(1995, -1, times, "../data/motif_library/gnw_networks/")
+    display_sim(1995, -1, times, "../data/motif_library/gnw_networks/", exp_condition='ki')
+    plt.show()

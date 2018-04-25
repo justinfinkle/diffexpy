@@ -333,75 +333,46 @@ if __name__ == '__main__':
     ========== Load the data ==========
     ===================================
     """
+    # Prep the raw data
+    project_name = "GSE69822"
+    contrast = 'ki-wt'
+    t = [0, 15, 40, 90, 180, 300]
+    raw = load_data('../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt')
+    gene_map = pd.read_csv('../data/GSE69822/mcf10a_gene_names.csv', index_col=0)
+    mk_ch_dir(project_name, ch=False)
 
-    # Set project parameters
-    t = [0, 15, 30, 60, 120, 240, 480]
-    conditions = ['ko', 'wt', 'ki']
-    stimuli = ['activating', 'deactivating']
-    reps = 3
-    project_name = 'insilico_strongly_connected_2'
-    data_dir = '../data/insilico/strongly_connected_2/'
-
-    # Keep track of the gene names
-    gene_names = pd.read_csv("{}gene_anonymization.csv".format(data_dir), header=None, index_col=0)
-    ko_gene = 'YMR016C'
-    stim_gene = 'YKL062W'
-    ko_gene = gene_names.loc[ko_gene, 1]
-    stim_gene = gene_names.loc[stim_gene, 1]
-    print(ko_gene, stim_gene)
-
-    # Keep track of the perturbations
-    perturbations = pd.read_csv("{}perturbations.csv".format(data_dir), index_col=0)
-    p_labels = perturbations.index.values
-    n_timeseries = len(p_labels) / reps
-    df, dg = tsv_to_dg("{}Yeast-100_anon_goldstandard_signed.tsv".format(data_dir))
-
-    data = load_insilico_data(data_dir, conditions, stimuli, 'Yeast-100_anon', times=t)
-
-    idx = pd.IndexSlice
-    perturb = 1
-    raw = data.loc[idx[:, :, perturb, :], :].T      # type: pd.DataFrame
-    # Set names appropriately
-    raw.columns.set_names(['replicate', 'perturb', 'time'], [1, 2, 3], inplace=True)
-
-    # Mean-variance plot
-    if plot_mean_variance:
-        plt.plot(raw.mean(axis=1), raw.std(axis=1), '.')
-        plt.xlabel('Mean expression')
-        plt.ylabel('Expression std')
-        plt.title('Heteroskedasticity')
-        plt.tight_layout()
-        plt.show()
-
-    # Shift the background to prevent negatives in log
-    raw += 1
     """
     ===================================
     ============ TRAINING =============
     ===================================
     """
     contrast = 'ko-wt'
-    prefix = prefix = "{}/{}_{}_".format(project_name, project_name, contrast) # For saving intermediate data
+    prefix = "{}/{}_{}_".format(project_name, project_name, contrast) # For saving intermediate data
 
     try:
         dea = pd.read_pickle("{}dea.pkl".format(prefix))  # type: DEAnalysis
     except:
-        dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=False)
+        dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=True)
 
     if override:
-        dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=False)
+        dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=True)
 
     scores = pd.read_pickle("{}dde.pkl".format(prefix))
-    filtered_data = dea.data.loc[:, contrast.split('-')]
+
+    # Mean-variance plot
+    if plot_mean_variance:
+        plt.plot(dea.voom_data.mean(axis=1), dea.voom_data.std(axis=1), '.')
+        plt.xlabel('Mean expression')
+        plt.ylabel('Expression std')
+        plt.title('Heteroskedasticity')
+        plt.tight_layout()
+        plt.show()
+
+    filtered_data = dea.voom_data.loc[:, contrast.split('-')]
     der = dea.results[contrast]
 
     dde_genes = filter_dde(scores, thresh=2, p=1).sort_values('score', ascending=False)
-    actual_dde_genes = filter_dde(scores, thresh=2, p=1).sort_values('score', ascending=False)
     dde_genes.sort_values('score', ascending=False, inplace=True)
-    dep = DEPlot()
-    dep.tsplot(raw.loc['G38'])
-    plt.show()
-    sys.exit()
 
     try:
         sim_stats = pd.read_pickle("{}sim_stats.pkl".format(prefix))  # type: pd.DataFrame
@@ -441,7 +412,7 @@ if __name__ == '__main__':
     try:
         true_dea = pd.read_pickle("{}dea.pkl".format(test_prefix))  # type: DEAnalysis
     except:
-        true_dea = dde(raw, test_contrast, project_name, save_permute_data=True, calc_p=True, voom=False)
+        true_dea = dde(raw, test_contrast, project_name, save_permute_data=True, calc_p=True, voom=True)
 
     predicted_scores = pd.read_pickle("{}dde.pkl".format(test_prefix))
 
@@ -453,13 +424,8 @@ if __name__ == '__main__':
     idx = pd.IndexSlice
     pred_sim.sort_index(inplace=True)
     pred_sim = pred_sim.loc[idx[:, 1, 'y'], :]
-    true_data = (raw.loc[:, idx['ki', :, 1]] - 1).groupby(level='time', axis=1).mean()
-
-    def ar(x):
-        lfc = np.log2(x.values/x.values[0])
-        return lfc[1:]
-
-    match['corr'] = match.apply(lambda x: stats.pearsonr(ar(true_data.loc[x.true_gene]), ar(pred_sim.loc[x.name, 'ki_mean']))[0], axis=1)
+    true_data = dea.voom_data.loc[:, idx['ki', :, :]].groupby(level='time', axis=1).mean()
+    match['corr'] = match.apply(lambda x: stats.pearsonr(true_data.loc[x.true_gene], pred_sim.loc[x.name, 'ki_mean'])[0], axis=1)
 
     pred_wlfc = (pred_sim.loc[:, 'lfc'])#*(1-pred_sim.loc[:, 'lfc_pvalue']))
     true_wlfc = (true_dea.results['ki-wt'].top_table().iloc[:, :len(t)])# * (1-true_dea.results['ki-wt'].p_value))
@@ -492,14 +458,17 @@ if __name__ == '__main__':
     n_matches = len(g.groups)
     diffs = []
 
+
     def sample_stats(df, dist_dict, resamples=100):
         random_sample_means = [np.mean(np.random.choice(dist_dict[df.name], len(df))) for _ in range(resamples)]
         rs_mean = np.median(random_sample_means)
         mean_lfc_mae = mae(true_wlfc.loc[df.name], pred_wlfc.loc[g.get_group(df.name).index].mean(axis=0))
         ttest = stats.mannwhitneyu(df.mae, random_sample_means)
-        s = pd.Series([len(df), (rs_mean-df.mae.median())/rs_mean*100, ttest.pvalue/2, mean_lfc_mae, rs_mean, df.mae.median()],
+        s = pd.Series([len(df), (rs_mean - df.mae.median()) / rs_mean * 100, ttest.pvalue / 2, mean_lfc_mae, rs_mean,
+                       df.mae.median()],
                       index=['n', 'mae_diff', 'mae_pvalue', 'mean_lfc_mae', 'random_mae', 'group_mae'])
         return s
+
 
     x = pd.concat([dde_genes, g.apply(sample_stats, gene_mae_dist_dict, resamples)], axis=1)
     print(x[(x.mae_diff > 0) & (x.mae_pvalue < 0.05)].sort_values('mae_pvalue'))
