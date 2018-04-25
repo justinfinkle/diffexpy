@@ -65,10 +65,16 @@ def topo_dict(signed, unsigned):
 
 def simulate(net_file, save_path):
     # Simulate
+    if os.path.basename(net_file).replace('.xml', '_dream4_timeseries.tsv') in os.listdir(save_path):
+        print(net_file, 'exists')
+        return
+    print(net_file)
     simulate_network(net_file, save_dir=save_path)
 
 def gnw_call(call_list, stdout=None, stderr=subprocess.PIPE, **kwargs):
     devnull = open(os.devnull, 'w')
+    jar_loc = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/gnw/gnw-3.1.2b.jar'
+    jar_call = ['java', '-jar', jar_loc]
     if stdout is None:
         stdout = devnull
     if stderr is None:
@@ -83,6 +89,7 @@ def gnw_call(call_list, stdout=None, stderr=subprocess.PIPE, **kwargs):
         raise Exception(err)
 
 def simulate_network(network_file, save_dir=None, network_name=None, settings=None):
+    settings_default = '/Volumes/Hephaestus/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/motif_library/gnw_networks/settings.txt'
     if settings is None:
         settings = settings_default
     call_list = ['--simulate', '-c', settings, '--input-net', network_file]

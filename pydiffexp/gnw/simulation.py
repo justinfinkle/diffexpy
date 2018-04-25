@@ -692,8 +692,12 @@ class SBMLTree(eT.ElementTree):
                 v.set('name', "{}: no inputs".format(target_reaction))
 
                 # Remove list of modifiers
-                mods = [c for c in v.iter() if 'listOfModifiers' in c.tag][0]
-                v.remove(mods)
+                try:
+                    mods = [c for c in v.iter() if 'listOfModifiers' in c.tag][0]
+                    v.remove(mods)
+                # If there is no list of modifiers, no need to remove
+                except IndexError:
+                    pass
 
                 # Modify kinetics
                 param_list = [c for c in v.iter() if 'kineticLaw' in c.tag][0][0]
