@@ -243,7 +243,8 @@ class DEPlot(object):
         lower = mean - se * tstat
         return upper, lower
 
-    def add_ts(self, ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None, ci=0.83, fill=True, scatter=True):
+    def add_ts(self, ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None, ci=0.83, fill=True,
+               scatter=True, no_fill_legend=False):
         gene = data.name
         data = data.reset_index()
         grouped_stats = self.tsstats(gene, data, groupby=subgroup, ci=ci, group=subgroup)
@@ -261,7 +262,11 @@ class DEPlot(object):
             jitter_x = data[subgroup]  # +(np.random.normal(0, 1, len(data)))
             ax.plot(jitter_x, data[gene], '.', color=mean_color, ms=15, label='', alpha=0.5)
         if fill:
-            fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.2, label=(name + (' {:d}%CI'.format(int(ci * 100)))))
+            if no_fill_legend:
+                fill_label = ''
+            else:
+                fill_label = (name + (' {:d}%CI'.format(int(ci * 100))))
+            fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.2, label=fill_label)
             fill_kwargs = dict(fill_defaults, **fill_dict)
             ci_lines = self.confidence_interval_lines(grouped_stats['mean'], grouped_stats['se'], grouped_stats['tstat'])
             ax.fill_between(grouped_stats[subgroup], ci_lines[0], ci_lines[1], **fill_kwargs)
