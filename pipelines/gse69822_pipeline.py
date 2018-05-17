@@ -1,20 +1,20 @@
 import ast
+import itertools as it
+import multiprocessing as mp
 import os
 import shutil
 import sys
 import tarfile
-import itertools as it
-import multiprocessing as mp
 
+import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from pydiffexp import DEAnalysis, DEResults, DEPlot, get_scores, cluster_discrete, pairwise_corr
-from pydiffexp.gnw import mk_ch_dir, GnwNetResults, GnwSimResults, draw_results, get_graph, tsv_to_dg
+from pydiffexp import DEAnalysis, DEResults, get_scores, cluster_discrete, pairwise_corr
+from pydiffexp.gnw import mk_ch_dir, GnwNetResults, GnwSimResults, draw_results, get_graph
 from scipy import stats
 from scipy.spatial.distance import hamming
-import matplotlib.pyplot as plt
-import networkx as nx
 from sklearn.metrics import mean_absolute_error as mae
 from sklearn.metrics import mean_squared_error as mse
 
@@ -158,7 +158,7 @@ def dde(data, default_contrast, project_dir, n_permutes=100, permute_path=None, 
     if save_permute_data:
         print("Creating permute data")
         idx = pd.IndexSlice
-        data = dea.data.loc[:, idx[default_contrast.split('-'), :, :]]
+        data = dea.raw_data.loc[:, idx[default_contrast.split('-'), :, :]]
         grouped = data.groupby(level='condition', axis=1)
         save_permutes(permute_path, grouped, n=n_permutes)
 
@@ -235,7 +235,7 @@ def correlate(experimental: pd.DataFrame, simulated: pd.DataFrame, sim_condition
     sim_mean_z = sim_means.groupby(level='stat', axis=1).transform(stats.zscore, ddof=1).fillna(0)
     sim_mean_z.columns.set_levels([c.replace('_mean', "") for c in sim_mean_z.columns.levels[0]], level=0, inplace=True)
     corr = []
-    for c in ['ko', 'wt']:
+    for c in ['ki', 'wt']:
         print('Computing pairwise for {}'.format(c))
         pcorr, p = pairwise_corr(sim_mean_z.loc[:, c], mean_z.loc[:, c], axis=1)
         corr.append(pcorr)
@@ -269,14 +269,14 @@ def match_to_gene(x, y, correlation, unique_net=True):
         cur_corr.name = 'pearson_r'
         ranking = pd.concat([candidate_nets, cur_corr], axis=1)
         ranking['mean'] = (ranking['score'] + ranking['pearson_r']) / 2
-        ranking = ranking.loc[ranking.index.get_level_values(2) == 'y']
+        ranking = ranking.loc[ranking.index.get_level_values(2) == 'y'].copy()
 
         # Remove same network ids that are just different perturbations
         if unique_net:
             sorted_ranking = ranking.sort_values('mean', ascending=False)
             ranking = sorted_ranking[~sorted_ranking.index.get_level_values('id').duplicated(keep='first')].copy()
         ranking['true_gene'] = gene
-        matching_results = pd.concat([matching_results, ranking.reset_index()], ignore_index=True, join='inner')
+        matching_results = pd.concat([matching_results, ranking.reset_index()], ignore_index=True)
 
     return matching_results
 
@@ -346,7 +346,7 @@ if __name__ == '__main__':
     ============ TRAINING =============
     ===================================
     """
-    contrast = 'ko-wt'
+    contrast = 'ki-wt'
     prefix = "{}/{}_{}_".format(project_name, project_name, contrast) # For saving intermediate data
 
     try:
@@ -361,14 +361,14 @@ if __name__ == '__main__':
 
     # Mean-variance plot
     if plot_mean_variance:
-        plt.plot(dea.voom_data.mean(axis=1), dea.voom_data.std(axis=1), '.')
+        plt.plot(dea.data.mean(axis=1), dea.data.std(axis=1), '.')
         plt.xlabel('Mean expression')
         plt.ylabel('Expression std')
         plt.title('Heteroskedasticity')
         plt.tight_layout()
         plt.show()
 
-    filtered_data = dea.voom_data.loc[:, contrast.split('-')]
+    filtered_data = dea.data.loc[:, contrast.split('-')]
     der = dea.results[contrast]
 
     dde_genes = filter_dde(scores, thresh=2, p=1).sort_values('score', ascending=False)
@@ -388,7 +388,7 @@ if __name__ == '__main__':
     try:
         corr = pd.read_pickle("{}data_to_sim_corr.pkl".format(prefix))
     except:
-        corr = correlate(filtered_data, sim_stats.loc[sim_scores.index], ['ko_mean', 'wt_mean'], sim_node='y')
+        corr = correlate(filtered_data, sim_stats.loc[sim_scores.index], ['ki_mean', 'wt_mean'], sim_node='y')
         corr.to_pickle("{}data_to_sim_corr.pkl".format(prefix))
 
     match = match_to_gene(dde_genes, sim_scores, corr, unique_net=False)
@@ -424,7 +424,7 @@ if __name__ == '__main__':
     idx = pd.IndexSlice
     pred_sim.sort_index(inplace=True)
     pred_sim = pred_sim.loc[idx[:, 1, 'y'], :]
-    true_data = dea.voom_data.loc[:, idx['ki', :, :]].groupby(level='time', axis=1).mean()
+    true_data = dea.data.loc[:, idx['ki', :, :]].groupby(level='time', axis=1).mean()
     match['corr'] = match.apply(lambda x: stats.pearsonr(true_data.loc[x.true_gene], pred_sim.loc[x.name, 'ki_mean'])[0], axis=1)
 
     pred_wlfc = (pred_sim.loc[:, 'lfc'])#*(1-pred_sim.loc[:, 'lfc_pvalue']))
@@ -471,8 +471,15 @@ if __name__ == '__main__':
 
 
     x = pd.concat([dde_genes, g.apply(sample_stats, gene_mae_dist_dict, resamples)], axis=1)
-    print(x[(x.mae_diff > 0) & (x.mae_pvalue < 0.05)].sort_values('mae_pvalue'))
-    print(x[(x.mae_diff > 0) & (x.mae_pvalue < 0.05)].sort_values('mae_pvalue').shape)
+    sig = x[(x.mae_diff > 0) & (x.mae_pvalue < 0.05)].sort_values('mae_pvalue')
+    print(sig)
+    sns.boxplot(data=pd.melt(sig, id_vars=sig.columns[:-3], value_vars=sig.columns[-3:]), x='variable', y='value',
+                notch=True, showfliers=False)
+    plt.tight_layout()
+    # plt.show()
+    print(sig.mae_diff.mean())
+    print(stats.mannwhitneyu(sig.mean_lfc_mae, sig.random_mae))
+    print(stats.mannwhitneyu(sig.group_mae, sig.random_mae))
     sys.exit()
             # if ttest.pvalue/2< 0.05 and info.mae.mean()<rs_mean: # Significant
             #     sig +=1
