@@ -6,6 +6,7 @@ import shutil
 import tarfile
 
 import matplotlib.pyplot as plt
+import seaborn as sns
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -13,6 +14,7 @@ from pydiffexp import DEAnalysis, DEResults, DEPlot, get_scores, cluster_discret
 from pydiffexp.gnw import mk_ch_dir, GnwNetResults, GnwSimResults, draw_results, get_graph
 from scipy import stats
 from scipy.spatial.distance import hamming
+from sklearn.metrics import mean_squared_error as mse
 
 
 class DynamicDifferentialExpression(object):
@@ -85,7 +87,89 @@ class DynamicDifferentialExpression(object):
         """
         return {'perturbation': 1, 'gene': 'y'}
 
-    def predict(self, test, prefix, ctrl=None, sim_filter=None):
+    def score(self, prefix, exp, ctrl, sim_predictions=None, sim_filter=None,
+              f=None, reduced_set=True):
+
+        if f is None:
+            f = mse
+
+        contrast = "{}-{}".format(exp, ctrl)
+
+        # Fit new contrast
+        self.dea.fit_contrasts(self.dea.default_contrasts[contrast]['contrasts'],
+                               fit_names=contrast)
+
+        true_der = self.dea.results[contrast]
+
+        true_lfc = true_der.top_table().iloc[:, :len(self.times)]
+
+        if sim_filter is None:
+            sim_filter = self._sim_filter_default()
+
+        if sim_predictions is None:
+            sim_path = os.path.join(self.dir,
+                                    '{}_{}_sim_stats.pkl'.format(prefix,
+                                                                 contrast))
+
+            # Get the predicted values
+            sim_predictions = self.load_sim_stats(sim_path, self.times, exp, ctrl,
+                                                  **sim_filter)
+
+        pred_lfc = sim_predictions.loc[:, 'lfc']
+
+        match = self.match.copy()
+        match['error'] = self.match.apply(lambda x: f(true_lfc.loc[x.true_gene],
+                                                      pred_lfc.loc[x.name]), axis=1)
+
+        if reduced_set:
+            true_lfc = true_lfc.loc[list(set(match['true_gene']))]
+        gene_mae_dist_dict = {ii: [f(pwlfc, twlfc) for pwlfc in pred_lfc.values]
+                              for ii, twlfc in true_lfc.iterrows()}
+
+        g = match.groupby('true_gene')
+
+        def sample_stats(df, dist_dict, resamples=100):
+            random_sample_means = [np.mean(np.random.choice(dist_dict[df.name], len(df))) for _ in range(resamples)]
+            rs_mean = np.median(random_sample_means)
+            mean_lfc_mae = mse(true_lfc.loc[df.name], pred_lfc.loc[self.estimators.get_group(df.name).index].mean(axis=0))
+            ttest = stats.mannwhitneyu(df.error, random_sample_means)
+            s = pd.Series(
+                [len(df), (rs_mean - df.error.median()) / rs_mean * 100, ttest.pvalue / 2, mean_lfc_mae, rs_mean,
+                 df.error.median()],
+                index=['n', 'mae_diff', 'mae_pvalue', 'mean_lfc_mae', 'random_mae', 'group_mae'])
+            return s
+
+        x = pd.concat([self.dde_genes, g.apply(sample_stats, gene_mae_dist_dict)], axis=1).dropna()
+        print(x)
+        print(stats.mannwhitneyu(x.mean_lfc_mae, x.random_mae))
+        print(stats.mannwhitneyu(x.group_mae, x.random_mae))
+        melted = pd.melt(x, id_vars=x.columns[:-3], value_vars=x.columns[-3:], var_name='stat')
+        plt.figure(figsize=(3, 5))
+        ax = sns.boxplot(data=melted, x='stat', y='value', notch=True, showfliers=False, width=0.5)
+        # sns.swarmplot(data=melted, x='stat', y='value', color='black')
+        ax.set(xticklabels=['mean', 'random', 'grouped'])
+        plt.xticks(rotation=45)
+        plt.xlabel("")
+        plt.ylabel("")
+        plt.ylim([-0.5, 8])
+        plt.tight_layout()
+        plt.show()
+        sys.exit()
+
+    def predict(self, test, prefix, estimators=None, ctrl=None, sim_filter=None,
+                sim_predictions=None, error_func=None):
+        """
+        Calculate predictions from trained estimators
+        :param test:
+        :param prefix:
+        :param estimators: pd.groupby; grouped estimators for each gene. Default
+        is None in which case the trained estimators will be used. Passed
+        estimators are likely for testing against random estimators
+        :param ctrl:
+        :param sim_filter:
+        :return:
+        """
+
         if sim_filter is None:
             sim_filter = self._sim_filter_default()
 
@@ -95,18 +179,36 @@ class DynamicDifferentialExpression(object):
 
         contrast = '{}-{}'.format(test, ctrl)
 
-        sim_path = os.path.join(self.dir,
-                                '{}_{}_sim_stats.pkl'.format(prefix, contrast))
+        if sim_predictions is None:
+            sim_path = os.path.join(self.dir,
+                                    '{}_{}_sim_stats.pkl'.format(prefix,
+                                                                 contrast))
 
-        # Get the predicted values
-        pred_stats = self.load_sim_stats(sim_path, self.times, test, ctrl,
-                                         **sim_filter)
+            # Get the predicted values
+            sim_predictions = self.load_sim_stats(sim_path, self.times, test, ctrl,
+                                                  **sim_filter)
+
+        # Set default.
+        if estimators is None:
+            estimators = self.estimators
 
         # Calculate estimator predictions
-        prediction = self.estimators.apply(self.estimator_prediction, ctrl=ctrl,
-                                           pred_lib=pred_stats)
+        prediction = estimators.apply(self.estimator_prediction, ctrl=ctrl,
+                                      pred_lib=sim_predictions)
 
-        return prediction
+        error = self.score_prediction(test, prediction, error_func)
+
+        return prediction, error, sim_predictions
+
+    def score_prediction(self, c, prediction, f=None):
+        if f is None:
+            f = mse
+        true_data = self.dea.data.loc[prediction.index, c]
+        timeseries_mean = true_data.groupby(level='time', axis=1)
+        true_value = timeseries_mean.mean()
+        error = true_value.apply(lambda x: f(x, prediction.loc[x.name]), axis=1)
+
+        return error
 
     def estimator_prediction(self, df, ctrl, pred_lib):
         """
@@ -126,18 +228,61 @@ class DynamicDifferentialExpression(object):
         pred = baseline+pred_lfc
         return pred
 
-    def compare_random(self, ):
-        pass
+    def compare_random(self, test, prefix, error_func=None,
+                       resamples=10):
+        if error_func is None:
+            error_func = mse
 
-    def random_sample(self, df, dist_dict, resamples=100):
-        random_sample_means = [np.mean(np.random.choice(dist_dict[df.name], len(df))) for _ in range(resamples)]
-        rs_mean = np.median(random_sample_means)
-        mean_lfc_mae = mse(true_wlfc.loc[df.name], pred_wlfc.loc[g.get_group(df.name).index].mean(axis=0))
-        ttest = stats.mannwhitneyu(df.mae, random_sample_means)
-        s = pd.Series([len(df), (rs_mean - df.mae.median()) / rs_mean * 100, ttest.pvalue / 2, mean_lfc_mae, rs_mean,
-                       df.mae.median()],
-                      index=['n', 'mae_diff', 'mae_pvalue', 'mean_lfc_mae', 'random_mae', 'group_mae'])
-        return s
+        # Calculate prediction error
+        _, pred_error, sim_pred = self.predict(test, prefix)
+        prediction_stats = pd.DataFrame(pred_error, columns=['pred_error'])
+        print(sim_pred)
+        sys.exit()
+
+        errors = []
+        print('Resampling may take awhile')
+        for r in range(resamples):
+            sample = self.estimators.apply(self.random_sample)
+
+            # Not sure how to prevent the dataframe from reducing,
+            # so just regroup for now
+            sample.index = sample.index.droplevel('true_gene')
+            sample = sample.groupby('true_gene')
+
+            _, error, _ = self.predict(test, prefix, sample,
+                                       sim_predictions=sim_pred,
+                                       error_func=error_func)
+            errors.append(error)
+        resample_error = pd.concat(errors, axis=1)
+        print('Done')
+
+        # Compare prediction to random
+        prediction_stats['random_error'] = resample_error.mean(axis=1)
+
+        def sig_test(x):
+            stat, pval = stats.ttest_1samp(resample_error.loc[x.name],
+                                           x.pred_error)
+            return pval
+
+        # prediction_stats['mannU_p'] = prediction_stats.apply(sig_test, axis=1)
+
+        return prediction_stats
+
+    def random_sample(self, df: pd.DataFrame):
+        n_estimators = len(df)
+        possible_estimators = self.sim_stats.index.values
+        random_estimators = np.random.choice(possible_estimators, n_estimators)
+        df.index = pd.MultiIndex.from_tuples(random_estimators,
+                                             names=df.index.names)
+        return df
+        # random_sample_means = [np.mean(np.random.choice(dist_dict[df.name], len(df))) for _ in range(resamples)]
+        # rs_mean = np.median(random_sample_means)
+        # mean_lfc_mae = mse(true_wlfc.loc[df.name], pred_wlfc.loc[g.get_group(df.name).index].mean(axis=0))
+        # ttest = stats.mannwhitneyu(df.mae, random_sample_means)
+        # s = pd.Series([len(df), (rs_mean - df.mae.median()) / rs_mean * 100, ttest.pvalue / 2, mean_lfc_mae, rs_mean,
+        #                df.mae.median()],
+        #               index=['n', 'mae_diff', 'mae_pvalue', 'mean_lfc_mae', 'random_mae', 'group_mae'])
+        # return s
 
     def train(self, data, prefix, times=None, override=False, experimental='ko',
               control='wt', sim_filter=None, **kwargs):
