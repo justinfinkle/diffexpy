@@ -77,7 +77,18 @@ class DynamicDifferentialExpression(object):
 
         return sim_stats
 
-    def predict(self, test, prefix, ctrl=None):
+    @staticmethod
+    def _sim_filter_default():
+        """
+        Default args for the simulation results
+        :return:
+        """
+        return {'perturbation': 1, 'gene': 'y'}
+
+    def predict(self, test, prefix, ctrl=None, sim_filter=None):
+        if sim_filter is None:
+            sim_filter = self._sim_filter_default()
+
         self.set_test_conditions(test)
         if ctrl is None:
             ctrl = self.training['control']
@@ -88,7 +99,8 @@ class DynamicDifferentialExpression(object):
                                 '{}_{}_sim_stats.pkl'.format(prefix, contrast))
 
         # Get the predicted values
-        pred_stats = self.load_sim_stats(sim_path, self.times, test, ctrl)
+        pred_stats = self.load_sim_stats(sim_path, self.times, test, ctrl,
+                                         **sim_filter)
 
         # Calculate estimator predictions
         prediction = self.estimators.apply(self.estimator_prediction, ctrl=ctrl,
@@ -145,7 +157,7 @@ class DynamicDifferentialExpression(object):
         """
 
         if sim_filter is None:
-            sim_filter = {'perturbation': 1, 'gene': 'y'}
+            sim_filter = self._sim_filter_default()
 
         # Set conditions
         contrast = "{}-{}".format(experimental, control)
