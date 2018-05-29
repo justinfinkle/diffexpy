@@ -358,7 +358,7 @@ class DEAnalysis(object):
         self.data_matrix = None             # type: robjects.vectors.Matrix
         self.contrast_robj = None           # type: robjects.vectors.Matrix
         self.fit = None                     # type: dict
-        self.results = None                 # type: Dict[str, DEResults]
+        self.results = {}                   # type: Dict[str, DEResults]
         self.contrast_dict = {}             # type: dict
         self.decide = None                  # type: pd.DataFrame
         self.db = None                      # type: pd.DataFrame
@@ -831,9 +831,8 @@ class DEAnalysis(object):
 
         contrasts_to_fit = self._make_fit_dict(contrasts, fit_names=fit_names, force_separate=force_separate)
 
-        self.results = self._fit_dict(contrasts_to_fit)
-
         # Add/Update Results dictionary
+        self.results.update(self._fit_dict(contrasts_to_fit))
         self.contrast_dict = self.match_contrasts()
         self.db = self.make_results_db()
 
