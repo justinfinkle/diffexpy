@@ -343,13 +343,13 @@ class DEAnalysis(object):
         :param reference_labels:
         """
 
+        self.raw = None                     # type: pd.DataFrame
         self.data = None                    # type: pd.DataFrame
         self.labels = None
         self.times = None                   # type: list
         self.conditions = None              # type: list
         self.replicates = None              # type: list
         self.voom = voom                    # type: bool
-        self.voom_data = None               # type: pd.DataFrame
         self.default_contrasts = None
         self.timeseries = False             # type: bool
         self.samples = None                 # type: list
@@ -363,7 +363,6 @@ class DEAnalysis(object):
         self.decide = None                  # type: pd.DataFrame
         self.db = None                      # type: pd.DataFrame
         self.log2 = log2                    # type: bool
-        self.log2_data = None               # type: pd.DataFrame
 
         if df is not None:
             # Set the data
@@ -408,8 +407,12 @@ class DEAnalysis(object):
                 raise ValueError('No valid multiindex was found, and one could not be created')
 
         # Sort multiindex
-        h_df.sort_index(axis=1, inplace=True)
-        self.data = h_df
+        try:
+            h_df.sort_index(axis=1, inplace=True)
+        except TypeError:
+            # If mixed types within a level, the sort won't work
+            pass
+        self.raw = h_df
 
         # Summarize the data and make data objects for R
         self.experiment_summary = self.get_experiment_summary(reference_labels=reference_labels)
@@ -443,7 +446,7 @@ class DEAnalysis(object):
         Summarize the experiment details in a data frame
         :return:
         """
-        index = self.data.columns
+        index = self.raw.columns
         summary_df = pd.DataFrame()
         for ii, name in enumerate(index.names):
             summary_df[name] = index.levels[ii].values[index.labels[ii]].astype(str)
@@ -635,32 +638,25 @@ class DEAnalysis(object):
         :return:
         """
         # Get the sample labels, genes, and data
-        genes = self.data.index.values
+        genes = self.raw.index.values
 
         if voom:
-            r_data = rh.pydf_to_rmat(self.data)
+            r_data = rh.pydf_to_rmat(self.raw)
             voom_results = rh.unpack_r_listvector(limma.voom(r_data, save_plot=True))
 
-            # Plot voom results
-            # print(voom_results['voom_xy'])
-            # plt.plot(voom_results['voom_xy']['x'], voom_results['voom_xy']['y'], '.')
-            # plt.plot(voom_results['voom_line']['x'], voom_results['voom_line']['y'])
-            # plt.show()
-            # sys.exit()
             data = voom_results['E']
 
             # Set the voom data
-            self.voom_data = voom_results['E'].copy()
-            cols_as_tup = list(map(ast.literal_eval, self.voom_data.columns.values))
-            self.voom_data.columns = pd.MultiIndex.from_tuples(cols_as_tup, names=self.data.columns.names)
+            self.data = voom_results['E'].copy()
+            cols_as_tup = list(map(ast.literal_eval, self.data.columns.values))
+            self.data.columns = pd.MultiIndex.from_tuples(cols_as_tup, names=self.raw.columns.names)
         else:
             # Log transform expression and correct values if needed
             if log2:
-                data = np.log2(self.data)
+                data = np.log2(self.raw)
                 # Save the new log2 data
-                self.log2_data = data
             else:
-                data = self.data
+                data = self.raw
 
             if np.sum(np.isnan(data.values)) > 0:
                 warnings.warn("NaNs detected during log expression transformation. Setting NaN values to zero.")
@@ -668,6 +664,9 @@ class DEAnalysis(object):
             if np.sum(np.isinf(data.values)) > 0:
                 warnings.warn("infs detected during log expression transformation. Setting inf values to zero.")
                 data.replace([np.inf, -np.inf], 0, inplace=True)
+
+            # Set the data
+            self.data = data
 
         r_matrix = rh.pydf_to_rmat(data)
         r_matrix.rownames = robjects.StrVector(genes)
