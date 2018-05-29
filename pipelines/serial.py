@@ -270,7 +270,7 @@ if __name__ == '__main__':
     # dea = dde(raw, contrast, project_name, save_permute_data=False, calc_p=False, voom=True)
     scores = pd.read_pickle("{}dde.pkl".format(prefix))
     dea = pd.read_pickle("{}dea.pkl".format(prefix))            # type: DEAnalysis
-    plt.plot(dea.voom_data.mean(axis=1), dea.voom_data.std(axis=1), '.')
+    plt.plot(dea.data.mean(axis=1), dea.data.std(axis=1), '.')
     plt.show()
     sys.exit()
     der = dea.results[contrast]                                 # type: DEResults
@@ -334,13 +334,13 @@ if __name__ == '__main__':
 
     true_dde_genes = filter_dde(true_scores)
     true_dde_genes = true_dde_genes[true_dde_genes['p_value'] < 0.05].sort_values('score', ascending=False)
-    true_filtered_data = true_dea.voom_data.loc[true_dde_genes.index, contrast.split('-')]
+    true_filtered_data = true_dea.data.loc[true_dde_genes.index, contrast.split('-')]
 
     combined = pd.concat([match, test_scores], join='inner', axis=1)
     matched_scores = true_scores.loc[match.true_gene].reset_index(drop=True)
     matched_scores.columns = ['true_cluster', 'true_score', 'true_p_value']
     all = pd.concat([combined.reset_index(), matched_scores], axis=1)
-    new_corr, new_p = correlate(true_dea.voom_data.loc[matched_genes, 'ki'], test_sim.loc[unique_nets], ['ki_mean'])
+    new_corr, new_p = correlate(true_dea.data.loc[matched_genes, 'ki'], test_sim.loc[unique_nets], ['ki_mean'])
     unstacked = new_corr.unstack().sort_index()
     up = new_p.unstack().sort_index()
     unstacked.name = 'pred_true_pearsonr'

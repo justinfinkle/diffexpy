@@ -7,12 +7,15 @@ import sys
 import tarfile
 
 import matplotlib.pyplot as plt
+from palettable.cartocolors.qualitative import Bold_8
 import networkx as nx
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from pydiffexp import gnw, DynamicDifferentialExpression
 from pydiffexp import DEAnalysis, DEResults, get_scores, cluster_discrete, pairwise_corr
 from pydiffexp.gnw import mk_ch_dir, GnwNetResults, GnwSimResults, draw_results, get_graph
+from pydiffexp import pipeline as pl
 from scipy import stats
 from scipy.spatial.distance import hamming
 from sklearn.metrics import mean_absolute_error as mae
@@ -132,50 +135,6 @@ def fit_dea(data, default_contrast, **kwargs):
     der = dea.results[default_contrast]  # type: DEResults
     scores = der.score_clustering()
     return dea, scores
-
-
-def dde(data, default_contrast, project_dir, n_permutes=100, permute_path=None, save_permute_data=False, calc_p=False,
-        compress=True, **kwargs):
-    # Set defaults
-    kwargs.setdefault('reference_labels', ['condition', 'time'])
-    kwargs.setdefault('index_names', ['condition', 'replicate', 'time'])
-
-    # Make the project directory to store the output
-    project_path = os.path.abspath(project_dir)
-    dir_name = os.path.split(project_path)[1]
-    print("Saving project files to {}".format(project_path))
-    mk_ch_dir(project_path, ch=False)
-    prefix = "{}/{}_{}_".format(project_path, dir_name, default_contrast)
-
-    dea, scores = fit_dea(data, default_contrast, **kwargs)
-    dea.to_pickle("{}dea.pkl".format(prefix), force_save=True)
-
-    # Make a directory for the permutes
-    if permute_path is None:
-        permute_path = "{}permutes".format(prefix)
-    mk_ch_dir(permute_path, ch=False)
-
-    if save_permute_data:
-        print("Creating permute data")
-        idx = pd.IndexSlice
-        data = dea.raw_data.loc[:, idx[default_contrast.split('-'), :, :]]
-        grouped = data.groupby(level='condition', axis=1)
-        save_permutes(permute_path, grouped, n=n_permutes)
-
-    if calc_p and len(os.listdir(permute_path)):
-        print("Calculating cluster ranking pvalues")
-        scores, ptest_scores = analyze_permutes(scores, permute_path, default_contrast, **kwargs)
-        print('Saving permutation test results')
-        scores.to_pickle("{}dde.pkl".format(prefix))
-        ptest_scores.to_pickle("{}ptest_scores.pkl".format(prefix))
-
-    if compress:
-        print('Compressing permute directory')
-        compress_directory(permute_path)
-        print('Removing permutes directory')
-        shutil.rmtree(permute_path)
-
-    return dea
 
 
 def compile_sim(sim_dir, times, save_path=None, pp=True, **kwargs):
@@ -322,7 +281,9 @@ def get_sim_data(sim_tuple, directory, condition='ki', times=None):
     series.index = series.index.droplevel('perturbation')
     return series
 
+
 if __name__ == '__main__':
+    sns.set_palette(Bold_8.mpl_colors)
     # Options
     pd.set_option('display.width', 250)
     override = False  # Rerun certain parts of the analysis
@@ -339,106 +300,79 @@ if __name__ == '__main__':
     t = [0, 15, 40, 90, 180, 300]
     raw = load_data('../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt')
     gene_map = pd.read_csv('../data/GSE69822/mcf10a_gene_names.csv', index_col=0)
+
     mk_ch_dir(project_name, ch=False)
 
     """
-    ===================================
-    ============ TRAINING =============
-    ===================================
+        ===================================
+        ============= Training ============
+        ===================================
     """
-    contrast = 'ki-wt'
-    prefix = "{}/{}_{}_".format(project_name, project_name, contrast) # For saving intermediate data
+    e_condition = 'ko'  # The experimental condition used
+    c_condition = 'wt'  # The control condition used
+    dde = DynamicDifferentialExpression(project_name)
+    matches = dde.train(raw, project_name, experimental=e_condition,
+                        voom=True)
+    print(dde.sim_stats)
+    sys.exit()
+    g = matches.groupby('true_gene')
 
-    try:
-        dea = pd.read_pickle("{}dea.pkl".format(prefix))  # type: DEAnalysis
-    except:
-        dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=True)
+    """
+        ====================================
+        ============= TESTING ==============
+        ====================================
+    """
+    t_condition = 'ki'  # The test condition
+    predictions = dde.predict(t_condition, project_name)
+    sys.exit()
 
-    if override:
-        dea = dde(raw, contrast, project_name, save_permute_data=True, calc_p=True, voom=True)
+    # Test for model overlap
+    for gene in set(g.groups.keys()).intersection(gt.groups.keys()):
+        training_models = set(g.get_group(gene).index.get_level_values('id'))
+        testing_models = set(gt.get_group(gene).index.get_level_values('id'))
+        pred = dde.dea.voom_data.loc[gene, 'wt'].groupby('time').mean() + test_dde.sim_stats.loc[
+                  g.get_group(gene).index, 'lfc'].mean()
+        actual = dde.dea.voom_data.loc[gene, t_condition].groupby('time').mean()
+        print(mae(pred, actual)-mae(pred.values[2:], actual.values[2:]))
+        # plt.figure()
+        # plt.plot((dde.dea.voom_data.loc[gene, 'wt'].groupby('time').mean() + test_dde.sim_stats.loc[
+        #           g.get_group(gene).index, 'lfc'].mean()).values[2:])
+        # plt.plot(dde.dea.voom_data.loc[gene, t_condition].groupby('time').mean().values[2:])
+        # plt.show()
+    sys.exit()
 
-    scores = pd.read_pickle("{}dde.pkl".format(prefix))
-
-    # Mean-variance plot
-    if plot_mean_variance:
-        plt.plot(dea.data.mean(axis=1), dea.data.std(axis=1), '.')
-        plt.xlabel('Mean expression')
-        plt.ylabel('Expression std')
-        plt.title('Heteroskedasticity')
-        plt.tight_layout()
-        plt.show()
-
-    filtered_data = dea.data.loc[:, contrast.split('-')]
-    der = dea.results[contrast]
-
-    dde_genes = filter_dde(scores, thresh=2, p=1).sort_values('score', ascending=False)
-    dde_genes.sort_values('score', ascending=False, inplace=True)
-
-    try:
-        sim_stats = pd.read_pickle("{}sim_stats.pkl".format(prefix))  # type: pd.DataFrame
-    except:
-        sim_stats = compile_sim('../data/motif_library/gnw_networks/', times=t,
-                                save_path="{}sim_stats.pkl".format(prefix))
-
+    # # Predict how the gene will respond compared to the WT
+    # try:
+    #     true_dea = pd.read_pickle("{}dea.pkl".format(test_prefix))  # type: DEAnalysis
+    # except:
+    #     true_dea = dde(raw, test_contrast, project_name, save_permute_data=True, calc_p=True, voom=True)
+    #
+    # predicted_scores = pd.read_pickle("{}dde.pkl".format(test_prefix))
+    #
+    # try:
+    #     pred_sim = pd.read_pickle("{}sim_stats.pkl".format(test_prefix))  # type: pd.DataFrame
+    # except:
+    #     pred_sim = compile_sim('../data/motif_library/gnw_networks/', times=t,
+    #                            save_path="{}sim_stats.pkl".format(test_prefix), experimental='ki')
     idx = pd.IndexSlice
-    sim_stats.sort_index(inplace=True)
-    sim_stats = sim_stats.loc[idx[:, 1, :], :].copy()
-    sim_scores = discretize_sim(sim_stats, filter_interesting=False)
+    pred_sim = test_dde.sim_stats.loc[idx[:, 1, 'y'], :].sort_index()
+    true_data = test_dde.dea.data.loc[:, idx['ki', :, :]].groupby(level='time', axis=1).mean()
 
-    try:
-        corr = pd.read_pickle("{}data_to_sim_corr.pkl".format(prefix))
-    except:
-        corr = correlate(filtered_data, sim_stats.loc[sim_scores.index], ['ki_mean', 'wt_mean'], sim_node='y')
-        corr.to_pickle("{}data_to_sim_corr.pkl".format(prefix))
+    matches['corr'] = matches.apply(
+        lambda x: stats.pearsonr(true_data.loc[x.true_gene], pred_sim.loc[x.name, 'ko_mean'])[0], axis=1)
 
-    match = match_to_gene(dde_genes, sim_scores, corr, unique_net=False)
-    match.set_index(['id', 'perturbation', 'gene'], inplace=True)
-    match.sort_values('mean', ascending=False, inplace=True)
-    match = match[match['mean'] > 0]
-    # match = match[~match.true_gene.duplicated(keep='first')]
-    matched_genes = list(set(match.true_gene))
-    unique_nets = list(set(match.index))
-    print(len(matched_genes))
+    pred_wlfc = (pred_sim.loc[:, 'lfc'])  # *(1-pred_sim.loc[:, 'lfc_pvalue']))
+    true_wlfc = (test_dde.dea.results['ko-wt'].top_table().iloc[:, :len(t)])  # * (1-true_dea.results['ki-wt'].p_value))
 
-    """
-    ====================================
-    ============= TESTING ==============
-    ====================================
-    """
-    test_prefix = prefix.replace('ko', 'ki')
-    test_contrast = contrast.replace('ko', 'ki')
-
-    # Predict how the gene will respond compared to the WT
-    try:
-        true_dea = pd.read_pickle("{}dea.pkl".format(test_prefix))  # type: DEAnalysis
-    except:
-        true_dea = dde(raw, test_contrast, project_name, save_permute_data=True, calc_p=True, voom=True)
-
-    predicted_scores = pd.read_pickle("{}dde.pkl".format(test_prefix))
-
-    try:
-        pred_sim = pd.read_pickle("{}sim_stats.pkl".format(test_prefix))  # type: pd.DataFrame
-    except:
-        pred_sim = compile_sim('../data/motif_library/gnw_networks/', times=t,
-                               save_path="{}sim_stats.pkl".format(test_prefix), experimental='ki')
-    idx = pd.IndexSlice
-    pred_sim.sort_index(inplace=True)
-    pred_sim = pred_sim.loc[idx[:, 1, 'y'], :]
-    true_data = dea.data.loc[:, idx['ki', :, :]].groupby(level='time', axis=1).mean()
-    match['corr'] = match.apply(lambda x: stats.pearsonr(true_data.loc[x.true_gene], pred_sim.loc[x.name, 'ki_mean'])[0], axis=1)
-
-    pred_wlfc = (pred_sim.loc[:, 'lfc'])#*(1-pred_sim.loc[:, 'lfc_pvalue']))
-    true_wlfc = (true_dea.results['ki-wt'].top_table().iloc[:, :len(t)])# * (1-true_dea.results['ki-wt'].p_value))
-
-    match['mae'] = match.apply(lambda x: mse(true_wlfc.loc[x.true_gene], pred_wlfc.loc[x.name]), axis=1)
+    matches['mae'] = matches.apply(lambda x: mse(true_wlfc.loc[x.true_gene], pred_wlfc.loc[x.name]), axis=1)
     # sns.violinplot(data=match, x='true_gene', y='mae')
     # plt.show()
     # sys.exit()
-    pred_clusters = discretize_sim(pred_sim, filter_interesting=False)
+    pred_clusters = pl.discretize_sim(pred_sim, filter_interesting=False)
     reduced_set = True
     if reduced_set:
         # pred_wlfc = pred_wlfc.loc[~match.index.duplicated()]
-        true_wlfc = true_wlfc.loc[matched_genes]
+        true_wlfc = true_wlfc.loc[list(set(matches['true_gene']))]
 
     gene_mae_dist_dict = {ii: [mse(pwlfc, twlfc) for pwlfc in pred_wlfc.values] for ii, twlfc in true_wlfc.iterrows()}
 
@@ -448,7 +382,7 @@ if __name__ == '__main__':
     # plt.show()
     # sys.exit()
     resamples = 100
-    g = match.groupby('true_gene')
+    g = matches.groupby('true_gene')
     # print(g['mean'].mean())
     # plt.plot(g['mean'].mean(), g['mae'].mean(), '.')
     # plt.show()
@@ -462,7 +396,7 @@ if __name__ == '__main__':
     def sample_stats(df, dist_dict, resamples=100):
         random_sample_means = [np.mean(np.random.choice(dist_dict[df.name], len(df))) for _ in range(resamples)]
         rs_mean = np.median(random_sample_means)
-        mean_lfc_mae = mae(true_wlfc.loc[df.name], pred_wlfc.loc[g.get_group(df.name).index].mean(axis=0))
+        mean_lfc_mae = mse(true_wlfc.loc[df.name], pred_wlfc.loc[g.get_group(df.name).index].mean(axis=0))
         ttest = stats.mannwhitneyu(df.mae, random_sample_means)
         s = pd.Series([len(df), (rs_mean - df.mae.median()) / rs_mean * 100, ttest.pvalue / 2, mean_lfc_mae, rs_mean,
                        df.mae.median()],
@@ -470,119 +404,22 @@ if __name__ == '__main__':
         return s
 
 
-    x = pd.concat([dde_genes, g.apply(sample_stats, gene_mae_dist_dict, resamples)], axis=1)
-    sig = x[(x.mae_diff > 0) & (x.mae_pvalue < 0.05)].sort_values('mae_pvalue')
-    print(sig)
-    sns.boxplot(data=pd.melt(sig, id_vars=sig.columns[:-3], value_vars=sig.columns[-3:]), x='variable', y='value',
-                notch=True, showfliers=False)
-    plt.tight_layout()
-    # plt.show()
-    print(sig.mae_diff.mean())
-    print(stats.mannwhitneyu(sig.mean_lfc_mae, sig.random_mae))
-    print(stats.mannwhitneyu(sig.group_mae, sig.random_mae))
-    sys.exit()
-            # if ttest.pvalue/2< 0.05 and info.mae.mean()<rs_mean: # Significant
-            #     sig +=1
-
-    print(sig)
-    sys.exit()
-    print(stats.fisher_exact(ct))
-    sns.regplot(g['mean'].mean().values, np.array(diffs))
-    plt.show()
-    sns.swarmplot(diffs)
-    plt.show()
-        # print(ii, len(info), info.mae.mean(), np.mean(mae_dist), stats.mannwhitneyu(info.mae, mae_dist).pvalue<0.05)
-    sys.exit()
-    # clusters = np.array(list(map(eval, set(pred_clusters.loc[idx[:, :, 'y'], 'Cluster'])))).astype(int)
-    # # clusters = np.array(list(map(eval, pred_clusters.loc[idx[:, :, 'y'], 'Cluster']))).astype(int)
-    # p_clusters = np.array(list(map(eval, set(predicted_scores.Cluster)))).astype(int)
-    # for pc in p_clusters:
-    #     hams = [hamming(cc, pc) for cc in clusters]
-    #     print(len(hams), set(hams))
-    # sys.exit()
-    # ham_dist = {}
-    # for cc in np.array(list(map(eval, set(predicted_scores.Cluster)))).astype(int):
-    #     hams = [hamming(cc, pc) for pc in clusters]
-    #     print(len(set(hams)))
-    #     ham_dist[tuple(cc)] = [hamming(cc, pc) for pc in clusters]
-    # sys.exit()
-    # match['predicted_cluster'] = list(map(lambda x: np.array(eval(x)), pred_clusters.loc[match.index, 'Cluster']))
-    # match['actual_cluster'] = list(map(lambda x: np.array(eval(x)), predicted_scores.loc[match.true_gene, 'Cluster'].values))
-    # match['ham'] = [hamming(info.predicted_cluster, info.actual_cluster) for ii, info in match.iterrows()]
-    #
-    # for ii, info in g:
-    #     true_dist = ham_dist[tuple(info.actual_cluster[0])]
-    #     print(ii, stats.mannwhitneyu(info.ham, true_dist, alternative='greater'))
-    sys.exit()
-
-    try:
-        matched_sim_data = pd.read_pickle('{}matched_ki_sim_data.pkl'.format(test_prefix)).T
-    except:
-        matched_sim_data = compile_match_sim_data(match, "../data/motif_library/gnw_networks/", times=t)
-        matched_sim_data.to_pickle('{}matched_ki_sim_data.pkl'.format(test_prefix))
-    if override:
-        matched_sim_data = compile_match_sim_data(match, "../data/motif_library/gnw_networks/", times=t)
-        matched_sim_data.to_pickle('{}matched_ki_sim_data.pkl'.format(test_prefix))
-
-    matched_sim_data.index = pd.MultiIndex.from_tuples(list(map(eval, matched_sim_data.index)),
-                                                       names=['id', 'perturbation', 'gene'])
-
-    predictions = matched_sim_data.loc[match.index]                                   # type: pd.DataFrame
-    predictions.columns.set_levels(['sim_value'], level='condition', inplace=True)
-    predictions.columns.set_names(['condition', 'replicate', 'time'], inplace=True)
-
-    predictions.index = match.set_index('true_gene', append=True).index
-
-    true_data = raw.loc[:, idx['ki', :, 1]]-1
-    true_data.columns.set_levels(['true_value'], level='condition', inplace=True)
-    true_data.columns.set_levels([1, 2, 3], level='replicate', inplace=True)
-    tt = true_data.loc[match['true_gene']]
-    tt.columns = tt.columns.droplevel('perturb')
-    tt.index = predictions.index
-
-    tt = tt.divide(tt.abs().max(axis=1), axis=0)
-    predictions = predictions.divide(predictions.abs().max(axis=1), axis=0)
-
-    test_data = pd.concat([predictions + 1, tt+1], axis=1)
-    test_dea = DEAnalysis(test_data, reference_labels=['condition', 'time'], log2=True)
-
-    test_dea.fit_contrasts(test_dea.default_contrasts['sim_value-true_value']['contrasts'], fit_names='test')
-    test_der = test_dea.results['test']
-
-    top = test_der.top_table()
-    # print(test_der.top_table().shape)
-    # print(test_der.top_table(p=0.05).shape)
-    # print(test_der.top_table())
-    # sys.exit()
-    top.index = pd.MultiIndex.from_tuples(list(map(eval, top.index)), names=predictions.index.names)
-    # for ii in top.index.values:
-    #     dep.tsplot(np.log2(test_data.loc[ii]))
-    #     plt.tight_layout()
-    #     plt.show()
-    # print(top.index.values[0])
-    # sys.exit()
-
-    mean = match['mean']
-    p = top.loc[predictions.index, 'adj_pval']
-    plt.plot(mean, p, '.')
-    plt.show()
-    sys.exit()
-    # print(test_der.top_table().loc[str((str(('1335', .75, 'y')), 'G60'))])
-    # print(test_der.p_value)
-    # sys.exit()
-    # print(match.head())
-
-    pred = (get_sim_data((1335, .75, 'y'), '../data/motif_library/gnw_networks/', 'ki', t)+1)
-    true = true_data.loc['G60']
-    dep.tsplot(np.log2(pred), subgroup='Time')
-    dep.tsplot(np.log2(true))
-    plt.show()
-    sys.exit()
-    display_sim('1845', 'activating', 1, t, '../data/motif_library/gnw_networks/', exp_condition='ki')
-    dep.tsplot(np.log2(raw.loc['G92']))
+    x = pd.concat([dde.dde_genes, g.apply(sample_stats, gene_mae_dist_dict, resamples)], axis=1).dropna()
+    print(x)
+    print(stats.mannwhitneyu(x.mean_lfc_mae, x.random_mae))
+    print(stats.mannwhitneyu(x.group_mae, x.random_mae))
+    melted = pd.melt(x, id_vars=x.columns[:-3], value_vars=x.columns[-3:], var_name='stat')
+    plt.figure(figsize=(3, 5))
+    ax = sns.boxplot(data=melted, x='stat', y='value', notch=True, showfliers=False, width=0.5)
+    # sns.swarmplot(data=melted, x='stat', y='value', color='black')
+    ax.set(xticklabels=['mean', 'random', 'grouped'])
+    plt.xticks(rotation=45)
+    plt.xlabel("")
+    plt.ylabel("")
+    plt.ylim([-0.5, 8])
     plt.tight_layout()
     plt.show()
-
+    sys.exit()
 
 
 
