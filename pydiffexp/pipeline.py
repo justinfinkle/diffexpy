@@ -117,12 +117,18 @@ class DynamicDifferentialExpression(object):
 
         pred_lfc = sim_predictions.loc[:, 'lfc']
 
-        match = self.match.copy()
+        match = self.match.copy()       # type: pd.DataFrame
+
+        # Calculate log fold change error between predictions and actual values
         match['error'] = self.match.apply(lambda x: f(true_lfc.loc[x.true_gene],
                                                       pred_lfc.loc[x.name]), axis=1)
 
+        # Reduce the number of genes to score against, for speed purposes
         if reduced_set:
             true_lfc = true_lfc.loc[list(set(match['true_gene']))]
+
+        # Create a dictionary of each simulations prediction to each matched gene
+        # This is the distribution of the null model for randomly chosen models
         gene_mae_dist_dict = {ii: [f(pwlfc, twlfc) for pwlfc in pred_lfc.values]
                               for ii, twlfc in true_lfc.iterrows()}
 
@@ -223,25 +229,24 @@ class DynamicDifferentialExpression(object):
         baseline = self.dea.data.loc[df.name, ctrl].groupby('time').mean()
 
         # Calculate the average log fold change prediction in the group
-        pred_lfc = pred_lib.loc[df.index, 'lfc'].mean()
+        pred_lfc = pred_lib.loc[df.index, 'lfc'].median()
 
         pred = baseline+pred_lfc
         return pred
 
     def compare_random(self, test, prefix, error_func=None,
-                       resamples=10):
+                       resamples=100):
         if error_func is None:
             error_func = mse
 
         # Calculate prediction error
         _, pred_error, sim_pred = self.predict(test, prefix)
         prediction_stats = pd.DataFrame(pred_error, columns=['pred_error'])
-        print(sim_pred)
-        sys.exit()
 
         errors = []
         print('Resampling may take awhile')
         for r in range(resamples):
+            print(r)
             sample = self.estimators.apply(self.random_sample)
 
             # Not sure how to prevent the dataframe from reducing,
@@ -628,15 +633,6 @@ def match_to_gene(x, y, correlation, unique_net=True):
         matching_results = pd.concat([matching_results, ranking.reset_index()], ignore_index=True)
 
     return matching_results
-
-
-def clustering_hamming(x, y):
-    ham = [hamming(cluster, y[ii]) for ii, cluster in enumerate(x)]
-    return ham
-
-
-def match_true_predicted_data(matching, true_data, predicted_data):
-    print(matching)
 
 
 def compile_match_sim_data(matching, base_dir, condition='ki', times=None):
