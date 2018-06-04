@@ -106,7 +106,7 @@ if __name__ == '__main__':
     clean_data.columns.set_names(['replicate', 'perturbation', 'time'], [1, 2, 3], inplace=True)
 
     # Shift the background to prevent negatives in log. Only necessary because of GNW data scale
-    clean_data += 1
+    # clean_data += 1
 
     """
         ===================================
@@ -114,9 +114,10 @@ if __name__ == '__main__':
         ===================================
     """
     e_condition = 'ko'  # The experimental condition used
+    c_condition = 'wt'  # The control condition used
     dde = DynamicDifferentialExpression(project_name)
     matches = dde.train(clean_data, project_name, experimental=e_condition,
-                            log2=False)
+                        voom=True)
     g = matches.groupby('true_gene')
 
     """
@@ -125,96 +126,8 @@ if __name__ == '__main__':
         ====================================
     """
     t_condition = 'ki'  # The test condition
-    test_dde = DynamicDifferentialExpression(project_name)
-    test_matches = test_dde.train(clean_data, project_name, experimental=t_condition,
-                             log2=False)
-    gt = test_matches.groupby('true_gene')
+    # predictions, error, sim_pred = dde.predict(t_condition, project_name)
 
-    # Test for model overlap
-    # for gene in set(g.groups.keys()).intersection(gt.groups.keys()):
-    #     training_models = set(g.get_group(gene).index.get_level_values('id'))
-    #     testing_models = set(gt.get_group(gene).index.get_level_values('id'))
-    #     print(training_models.intersection(testing_models))
-    # sys.exit()
+    dde.score(project_name, t_condition, c_condition)
 
-    # # Predict how the gene will respond compared to the WT
-    # try:
-    #     true_dea = pd.read_pickle("{}dea.pkl".format(test_prefix))  # type: DEAnalysis
-    # except:
-    #     true_dea = dde(raw, test_contrast, project_name, save_permute_data=True, calc_p=True, voom=True)
-    #
-    # predicted_scores = pd.read_pickle("{}dde.pkl".format(test_prefix))
-    #
-    # try:
-    #     pred_sim = pd.read_pickle("{}sim_stats.pkl".format(test_prefix))  # type: pd.DataFrame
-    # except:
-    #     pred_sim = compile_sim('../data/motif_library/gnw_networks/', times=t,
-    #                            save_path="{}sim_stats.pkl".format(test_prefix), experimental='ki')
-    idx = pd.IndexSlice
-    pred_sim = test_dde.sim_stats.loc[idx[:, 1, 'y'], :].sort_index()
-    true_data = test_dde.dea.data.loc[:, idx['ki', :, :]].groupby(level='time', axis=1).mean()
-
-    matches['corr'] = matches.apply(
-        lambda x: stats.pearsonr(true_data.loc[x.true_gene], pred_sim.loc[x.name, 'ki_mean'])[0], axis=1)
-
-    pred_wlfc = (pred_sim.loc[:, 'lfc'])  # *(1-pred_sim.loc[:, 'lfc_pvalue']))
-    true_wlfc = (test_dde.dea.results['ki-wt'].top_table().iloc[:, :len(t)])  # * (1-true_dea.results['ki-wt'].p_value))
-
-    matches['mae'] = matches.apply(lambda x: mse(true_wlfc.loc[x.true_gene], pred_wlfc.loc[x.name]), axis=1)
-    # sns.violinplot(data=match, x='true_gene', y='mae')
-    # plt.show()
-    # sys.exit()
-    pred_clusters = pl.discretize_sim(pred_sim, filter_interesting=False)
-    reduced_set = True
-    if reduced_set:
-        # pred_wlfc = pred_wlfc.loc[~match.index.duplicated()]
-        true_wlfc = true_wlfc.loc[list(set(matches['true_gene']))]
-
-    gene_mae_dist_dict = {ii: [mse(pwlfc, twlfc) for pwlfc in pred_wlfc.values] for ii, twlfc in true_wlfc.iterrows()}
-
-    # mae_dist, pear_dist = zip(*[(mae(twlfc, pwlfc), stats.pearsonr(twlfc, pwlfc)) for twlfc in true_wlfc.values for pwlfc in pred_wlfc.values])
-
-    # plt.hist([mae(twlfc, pwlfc) for twlfc in true_wlfc.values for pwlfc in pred_wlfc.values], log=True)
-    # plt.show()
-    # sys.exit()
-    resamples = 100
-    g = matches.groupby('true_gene')
-    # print(g['mean'].mean())
-    # plt.plot(g['mean'].mean(), g['mae'].mean(), '.')
-    # plt.show()
-    # sys.exit()
-
-    sig = 0
-    n_matches = len(g.groups)
-    diffs = []
-
-
-    def sample_stats(df, dist_dict, resamples=100):
-        random_sample_means = [np.mean(np.random.choice(dist_dict[df.name], len(df))) for _ in range(resamples)]
-        rs_mean = np.median(random_sample_means)
-        mean_lfc_mae = mse(true_wlfc.loc[df.name], pred_wlfc.loc[g.get_group(df.name).index].mean(axis=0))
-        ttest = stats.mannwhitneyu(df.mae, random_sample_means)
-        s = pd.Series([len(df), (rs_mean - df.mae.median()) / rs_mean * 100, ttest.pvalue / 2, mean_lfc_mae, rs_mean,
-                       df.mae.median()],
-                      index=['n', 'mae_diff', 'mae_pvalue', 'mean_lfc_mae', 'random_mae', 'group_mae'])
-        return s
-
-
-    x = pd.concat([dde.dde_genes, g.apply(sample_stats, gene_mae_dist_dict, resamples)], axis=1).dropna()
-    print(x)
-    print(stats.mannwhitneyu(x.mean_lfc_mae, x.random_mae))
-    print(stats.mannwhitneyu(x.group_mae, x.random_mae))
-    plt.figure(figsize=(3,5))   
-    melted = pd.melt(x, id_vars=x.columns[:-3], value_vars=x.columns[-3:], var_name='stat', value_name='MAE')
-    ax = sns.boxplot(data=melted, x='stat', y='MAE', notch=True, showfliers=False, width=0.5)
-    sns.swarmplot(data=melted, x='stat', y='MAE', color='black')
-    ax.set(xticklabels=['mean', 'random', 'grouped'])
-    plt.xticks(rotation=45)
-    plt.xlabel("")
-    plt.ylabel("")
-    plt.ylim([-0.5, 8])
-    plt.tight_layout()
-    plt.show()
-    sys.exit()
-    sig = x[(x.mae_diff > 0) & (x.mae_pvalue < 0.05)].sort_values('mae_pvalue')
-    print(sig)
+    # e = dde.compare_random(t_condition, project_name).reset_index()
