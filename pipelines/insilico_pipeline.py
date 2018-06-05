@@ -118,7 +118,7 @@ if __name__ == '__main__':
     dde = DynamicDifferentialExpression(project_name)
     matches = dde.train(clean_data, project_name, experimental=e_condition,
                         voom=True)
-    g = matches.groupby('true_gene')
+    # g = matches.groupby('true_gene')
 
     """
         ====================================
@@ -128,4 +128,9 @@ if __name__ == '__main__':
     t_condition = 'ki'  # The test condition
     # predictions, error, sim_pred = dde.predict(t_condition, project_name)
 
-    dde.score(project_name, t_condition, c_condition)
+    # stats = dde.score(project_name, t_condition, c_condition)
+
+    # Check structures
+    info = dde.load_structures('../data/motif_library/gnw_networks/simulation_info.csv')
+
+    dde.score_topology('pass')
