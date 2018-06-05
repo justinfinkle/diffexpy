@@ -134,27 +134,15 @@ class DynamicDifferentialExpression(object):
 
         g = match.groupby('true_gene')
 
-        def sample_stats(df, dist_dict, resamples=100):
-            random_sample_means = [np.mean(np.random.choice(dist_dict[df.name], len(df))) for _ in range(resamples)]
-            rs_mean = np.median(random_sample_means)
-            x = true_lfc.loc[df.name]
-            mean_lfc_mae = mse(x, pred_lfc.loc[self.estimators.get_group(df.name).index].median(axis=0))
-            random_grouped = [mse(x, pred_lfc.iloc[np.random.randint(0, len(pred_lfc), len(df))].median()) for _ in range(resamples)]
-            all_model_median = mse(x, pred_lfc.median())
-            higher_err = sum(random_grouped > mean_lfc_mae)
-            all_zeros = mse(x, np.zeros((len(x))))
-            ttest = stats.mannwhitneyu(df.error, random_sample_means)
-            s = pd.Series(
-                [len(df), (rs_mean - df.error.median()) / rs_mean * 100, ttest.pvalue / 2, mean_lfc_mae, rs_mean,
-                 df.error.median(), all_model_median, all_zeros, np.mean(random_grouped), higher_err],
-                index=['n', 'mae_diff', 'mae_pvalue', 'mean_lfc_mae', 'random_mae', 'group_mae', 'random_median', 'all_zeros', 'random_grouped', 'higher_err'])
-            return s
+        test_stats = pd.concat([self.dde_genes, g.apply(self.sample_stats, gene_mae_dist_dict, true_lfc, pred_lfc)], axis=1).dropna()
+        self.plot_results(test_stats)
 
-        x = pd.concat([self.dde_genes, g.apply(sample_stats, gene_mae_dist_dict)], axis=1).dropna()
+    @staticmethod
+    def plot_results(x):
         print(x)
-        print(stats.mannwhitneyu(x.mean_lfc_mae, x.random_mae))
-        print(stats.mannwhitneyu(x.group_mae, x.random_mae))
-        melted = pd.melt(x, id_vars=x.columns[:-7], value_vars=x.columns[-7:], var_name='stat')
+        print(stats.wilcoxon(x.mean_lfc_mae, x.random_mae))
+        print(stats.wilcoxon(x.group_mae, x.random_mae))
+        melted = pd.melt(x, id_vars=x.columns[:-6], value_vars=x.columns[-6:], var_name='stat')
         plt.figure(figsize=(3, 5))
         ax = sns.boxplot(data=melted, x='stat', y='value', notch=True, showfliers=False, width=0.5)
         # sns.swarmplot(data=melted, x='stat', y='value', color='black')
@@ -162,10 +150,25 @@ class DynamicDifferentialExpression(object):
         plt.xticks(rotation=45)
         plt.xlabel("")
         plt.ylabel("")
-        plt.ylim([-0.5, 8])
         plt.tight_layout()
         plt.show()
         sys.exit()
+
+    def sample_stats(self, df, dist_dict, true_lfc, pred_lfc, resamples=100):
+        random_sample_means = [np.mean(np.random.choice(dist_dict[df.name], len(df))) for _ in range(resamples)]
+        rs_mean = np.median(random_sample_means)
+        x = true_lfc.loc[df.name]
+        mean_lfc_mae = mse(x, pred_lfc.loc[self.estimators.get_group(df.name).index].median(axis=0))
+        random_grouped = [mse(x, pred_lfc.iloc[np.random.randint(0, len(pred_lfc), len(df))].median()) for _ in
+                          range(resamples)]
+        all_model_median = mse(x, pred_lfc.median())
+        all_zeros = mse(x, np.zeros((len(x))))
+        s = pd.Series(
+            [len(df), (rs_mean - df.error.median()) / rs_mean * 100, mean_lfc_mae, rs_mean,
+             df.error.median(), all_model_median, all_zeros, np.mean(random_grouped)],
+            index=['n', 'err_diff', 'mean_lfc_mae', 'random_mae', 'group_mae', 'random_median',
+                   'all_zeros', 'random_grouped'])
+        return s
 
     def predict(self, test, prefix, estimators=None, ctrl=None, sim_filter=None,
                 sim_predictions=None, error_func=None):
