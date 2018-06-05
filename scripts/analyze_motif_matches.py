@@ -2,8 +2,12 @@ import itertools as it
 import sys
 
 import networkx as nx
+import numpy as np
 import pandas as pd
-from pydiffexp.gnw.sim_explorer import tsv_to_dg
+from pydiffexp.gnw.sim_explorer import tsv_to_dg, to_gephi
+import seaborn as sns
+from palettable.cartocolors import qualitative
+import matplotlib.pyplot as plt
 
 
 def expected_edges(node_dict, net: nx.DiGraph):
@@ -27,16 +31,16 @@ if __name__ == '__main__':
     except:
         print('no_path')
 
-    motif_matching = pd.read_hdf('intermediate_data/mcf10a_motif_match.hdf', 'mydata')  # type: pd.DataFrame
-    print(motif_matching[motif_matching['true_gene']=='ENSG00000186187'].sort_values('mean', ascending=False))
-    sys.exit()
+    motif_matching = pd.read_pickle('intermediate_data/strongly_connected_motif_match.pkl')  # type: pd.DataFrame
+    print(motif_matching)
+
     # filter out non_interesting genes and save to gephi
     filtered_nodes = list(set(motif_matching.true_gene))+list(edge_dict.values())
     keep_parent = np.array([n in filtered_nodes for n in df.Source])
     keep_child = np.array([n in filtered_nodes for n in df.Target])
     df = df[keep_parent & keep_child]
-    to_gephi(df, "intermediate_data/strongly_connected_filtered.csv")
-    sys.exit()
+    # to_gephi(df, "intermediate_data/strongly_connected_filtered.csv")
+    # sys.exit()
     grouped = motif_matching.groupby('true_gene')
     ii = 0
     max_edges = 6
@@ -77,7 +81,7 @@ if __name__ == '__main__':
     colors = qualitative.Bold_10.mpl_colors
     plt.figure(figsize=(5, 8))
     sns.set_style("whitegrid")
-    sns.boxplot(data=summary.loc[:, ['TPR', 'FDR', 'ACC', 'F1']], width=0.5, palette=colors)
+    sns.boxplot(data=summary.loc[:, ['TPR', 'FDR', 'ACC', 'F1']], width=0.5, palette=colors, showfliers=False)
     sns.swarmplot(data=summary.loc[:, ['TPR', 'FDR', 'ACC', 'F1']], color='0.2')
     # plt.plot([-1,3], [0.5, 0.5], '--', c=colors[2], label='Random')
     plt.ylim([0, 1])
