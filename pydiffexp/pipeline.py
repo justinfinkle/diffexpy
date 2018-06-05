@@ -137,19 +137,24 @@ class DynamicDifferentialExpression(object):
         def sample_stats(df, dist_dict, resamples=100):
             random_sample_means = [np.mean(np.random.choice(dist_dict[df.name], len(df))) for _ in range(resamples)]
             rs_mean = np.median(random_sample_means)
-            mean_lfc_mae = mse(true_lfc.loc[df.name], pred_lfc.loc[self.estimators.get_group(df.name).index].mean(axis=0))
+            x = true_lfc.loc[df.name]
+            mean_lfc_mae = mse(x, pred_lfc.loc[self.estimators.get_group(df.name).index].median(axis=0))
+            random_grouped = [mse(x, pred_lfc.iloc[np.random.randint(0, len(pred_lfc), len(df))].median()) for _ in range(resamples)]
+            all_model_median = mse(x, pred_lfc.median())
+            higher_err = sum(random_grouped > mean_lfc_mae)
+            all_zeros = mse(x, np.zeros((len(x))))
             ttest = stats.mannwhitneyu(df.error, random_sample_means)
             s = pd.Series(
                 [len(df), (rs_mean - df.error.median()) / rs_mean * 100, ttest.pvalue / 2, mean_lfc_mae, rs_mean,
-                 df.error.median()],
-                index=['n', 'mae_diff', 'mae_pvalue', 'mean_lfc_mae', 'random_mae', 'group_mae'])
+                 df.error.median(), all_model_median, all_zeros, np.mean(random_grouped), higher_err],
+                index=['n', 'mae_diff', 'mae_pvalue', 'mean_lfc_mae', 'random_mae', 'group_mae', 'random_median', 'all_zeros', 'random_grouped', 'higher_err'])
             return s
 
         x = pd.concat([self.dde_genes, g.apply(sample_stats, gene_mae_dist_dict)], axis=1).dropna()
         print(x)
         print(stats.mannwhitneyu(x.mean_lfc_mae, x.random_mae))
         print(stats.mannwhitneyu(x.group_mae, x.random_mae))
-        melted = pd.melt(x, id_vars=x.columns[:-3], value_vars=x.columns[-3:], var_name='stat')
+        melted = pd.melt(x, id_vars=x.columns[:-7], value_vars=x.columns[-7:], var_name='stat')
         plt.figure(figsize=(3, 5))
         ax = sns.boxplot(data=melted, x='stat', y='value', notch=True, showfliers=False, width=0.5)
         # sns.swarmplot(data=melted, x='stat', y='value', color='black')
@@ -233,61 +238,6 @@ class DynamicDifferentialExpression(object):
 
         pred = baseline+pred_lfc
         return pred
-
-    def compare_random(self, test, prefix, error_func=None,
-                       resamples=100):
-        if error_func is None:
-            error_func = mse
-
-        # Calculate prediction error
-        _, pred_error, sim_pred = self.predict(test, prefix)
-        prediction_stats = pd.DataFrame(pred_error, columns=['pred_error'])
-
-        errors = []
-        print('Resampling may take awhile')
-        for r in range(resamples):
-            print(r)
-            sample = self.estimators.apply(self.random_sample)
-
-            # Not sure how to prevent the dataframe from reducing,
-            # so just regroup for now
-            sample.index = sample.index.droplevel('true_gene')
-            sample = sample.groupby('true_gene')
-
-            _, error, _ = self.predict(test, prefix, sample,
-                                       sim_predictions=sim_pred,
-                                       error_func=error_func)
-            errors.append(error)
-        resample_error = pd.concat(errors, axis=1)
-        print('Done')
-
-        # Compare prediction to random
-        prediction_stats['random_error'] = resample_error.mean(axis=1)
-
-        def sig_test(x):
-            stat, pval = stats.ttest_1samp(resample_error.loc[x.name],
-                                           x.pred_error)
-            return pval
-
-        # prediction_stats['mannU_p'] = prediction_stats.apply(sig_test, axis=1)
-
-        return prediction_stats
-
-    def random_sample(self, df: pd.DataFrame):
-        n_estimators = len(df)
-        possible_estimators = self.sim_stats.index.values
-        random_estimators = np.random.choice(possible_estimators, n_estimators)
-        df.index = pd.MultiIndex.from_tuples(random_estimators,
-                                             names=df.index.names)
-        return df
-        # random_sample_means = [np.mean(np.random.choice(dist_dict[df.name], len(df))) for _ in range(resamples)]
-        # rs_mean = np.median(random_sample_means)
-        # mean_lfc_mae = mse(true_wlfc.loc[df.name], pred_wlfc.loc[g.get_group(df.name).index].mean(axis=0))
-        # ttest = stats.mannwhitneyu(df.mae, random_sample_means)
-        # s = pd.Series([len(df), (rs_mean - df.mae.median()) / rs_mean * 100, ttest.pvalue / 2, mean_lfc_mae, rs_mean,
-        #                df.mae.median()],
-        #               index=['n', 'mae_diff', 'mae_pvalue', 'mean_lfc_mae', 'random_mae', 'group_mae'])
-        # return s
 
     def train(self, data, prefix, times=None, override=False, experimental='ko',
               control='wt', sim_filter=None, **kwargs):

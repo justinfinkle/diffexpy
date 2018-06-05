@@ -106,7 +106,7 @@ if __name__ == '__main__':
     clean_data.columns.set_names(['replicate', 'perturbation', 'time'], [1, 2, 3], inplace=True)
 
     # Shift the background to prevent negatives in log. Only necessary because of GNW data scale
-    # clean_data += 1
+    clean_data += 1
 
     """
         ===================================
@@ -129,5 +129,3 @@ if __name__ == '__main__':
     # predictions, error, sim_pred = dde.predict(t_condition, project_name)
 
     dde.score(project_name, t_condition, c_condition)
-
-    # e = dde.compare_random(t_condition, project_name).reset_index()

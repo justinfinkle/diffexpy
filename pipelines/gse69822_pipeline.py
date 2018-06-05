@@ -68,7 +68,5 @@ if __name__ == '__main__':
 
     dde.score(project_name, t_condition, c_condition)
 
-    # e = dde.compare_random(t_condition, project_name).reset_index()
-
 
 
