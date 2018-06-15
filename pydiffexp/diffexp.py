@@ -740,9 +740,12 @@ class DEAnalysis(object):
                                 fit_type=contrast['fit_type']) for name, contrast in contrast_dict.items()}
         return fits
 
-    def _samples_in_contrast(self, contrast: str, split_str='-') -> list:
+    def _samples_in_contrast(self, contrast: str, split_str='-') -> set:
+        # Split the contrasts into individual samples
         s = contrast.split(split_str)
-        samples = set(grepl(s[0], self.samples)).union(grepl(s[1], self.samples))
+
+        # Make sure the samples match what is available in the data
+        samples = set().union(*[grepl(ss.strip('(').strip(')'), self.samples) for ss in s])
         return samples
 
     def _make_fit_dict(self, contrasts, fit_names=None, force_separate=False) -> dict:
