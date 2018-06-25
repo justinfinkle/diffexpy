@@ -150,7 +150,7 @@ class DEPlot(object):
         self.dea = dea                              # type: DEAnalysis
 
     def volcano_plot(self, df: pd.DataFrame, p_value: float = 0.05, fc=2, x_colname='logFC', y_colname='-log10p',
-                     cutoff_lines=True, top_n=None, top_by='-log10p', show_labels=False, **kwargs):
+                     cutoff_lines=True, top_n=None, top_by='-log10p', show_labels=False, legend=True, **kwargs):
 
         # Get rid of NaN data
         df = df.dropna()
@@ -209,7 +209,8 @@ class DEPlot(object):
             ax.plot([-log2_fc, -log2_fc], [0, max_y], '--', c=color, lw=3)
             ax.plot([log2_fc, log2_fc], [0, max_y], '--', c=color, lw=3)
 
-        ax.legend(loc='best', numpoints=1)
+        if legend:
+            ax.legend(loc='best', numpoints=1)
 
         # Adjust labels
         ax.tick_params(axis='both', which='major')
@@ -406,16 +407,16 @@ class DEPlot(object):
         """
         # X coordinates must be sorted otherswise nodes won't be assigned to the proper location
         x_coords = sorted(x_coords)
-
+        n_times = len(x_coords)
         # Iterate through each entry in the flow dictionary.
         nodes = {}
         for step, seg_dict in flow_dict.items():
             levels = set([seg[0] for seg in seg_dict.keys()])
-            if step == len(x_coords) - 2:
+            if step == n_times - 2:
                 levels = levels.union(set([seg[1] for seg in seg_dict.keys()]))
 
             for level in levels:
-                for i, h in self.calc_height(flow_dict, seg_dict, step, level).items():
+                for i, h in self.calc_height(flow_dict, seg_dict, step, level, n_times).items():
                     offset = self.calc_offset(flow_dict, nodes, step + i, level, h)
                     nodes[(step + i, level)] = patches.Polygon(
                         self.make_node_points(x_coords[step + i], level + offset, h, node_width),
@@ -424,7 +425,7 @@ class DEPlot(object):
 
         return nodes
 
-    def calc_height(self, flow_dict, seg_dict, x, y):
+    def calc_height(self, flow_dict, seg_dict, x, y, n_times):
         """ Gets node heights for given step and level
 
         Arguments:
@@ -451,7 +452,7 @@ class DEPlot(object):
             # heights[0] = np.sum([flow[0] for seg, flow in flow_dict[x - 1].items() if seg[1] == y])
 
             # Additional heights for ending nodes.
-            if x == 3:
+            if x == n_times-2:
                 heights[1] = np.sum([np.abs(flow[0]) for seg, flow in flow_dict[x].items() if seg[1] == y])
 
         return heights
@@ -700,7 +701,7 @@ class DEPlot(object):
             ax.set_ylim([y_min, y_max])
             nodes = self.plot_nodes(ax, flow_dict, node_width, x_coords)  # plot nodes
             colors = colors[0]
-            self.up_patches = self.plot_polys(ax, flow_dict, nodes, _colors[3], 1, dir='up')  # plot up polygons
+            self.up_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='up')  # plot up polygons
             self.down_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='down')  # plot down polygons
             self.horizontal_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='over')  # plot rectangles
 
