@@ -552,7 +552,6 @@ class DEPlot(object):
                         point_set[1] = self.up_patches[(step, level - 1)].xy[0]
                     else:
                         point_set[1] = nodes[(step + 1, level)].xy[0].copy()
-                        point_set[1][1] = point_set[0][1]
 
                     point_set[3] = np.array([point_set[0][0], point_set[0][1] + mass])
                     point_set[2] = np.array([point_set[1][0], point_set[1][1] + mass])
