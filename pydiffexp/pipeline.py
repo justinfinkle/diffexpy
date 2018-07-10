@@ -120,24 +120,27 @@ class DynamicDifferentialExpression(object):
 
         pred_lfc = sim_predictions.loc[:, 'lfc']
 
-        match = self.match.copy()       # type: pd.DataFrame
-
-        # Calculate log fold change error between predictions and actual values
-        match['error'] = self.match.apply(lambda x: f(true_lfc.loc[x.true_gene],
-                                                      pred_lfc.loc[x.name]), axis=1)
-
         # Reduce the number of genes to score against, for speed purposes
         if reduced_set:
-            true_lfc = true_lfc.loc[list(set(match['true_gene']))]
+            true_lfc = true_lfc.loc[list(set(self.match['true_gene']))]
 
         # Create a dictionary of each simulations prediction to each matched gene
         # This is the distribution of the null model for randomly chosen models
-        gene_mae_dist_dict = {ii: [f(pwlfc, twlfc) for pwlfc in pred_lfc.values]
+        gene_err_dist_dict = {ii: [f(pwlfc, twlfc) for pwlfc in pred_lfc.values]
                               for ii, twlfc in true_lfc.iterrows()}
 
-        g = match.groupby('true_gene')
+        gene_to_model_error = pd.DataFrame.from_dict(gene_err_dist_dict,
+                                                     orient='index')
 
-        test_stats = pd.concat([self.dde_genes, g.apply(self.sample_stats, gene_mae_dist_dict, true_lfc, pred_lfc)], axis=1).dropna()
+        # Set the columns to match the models
+        gene_to_model_error.columns = pred_lfc.index
+
+        # Calculate null model
+        null_stats = self.estimators.apply(self.sample_stats, gene_to_model_error,
+                                           true_lfc, pred_lfc)
+
+        # Combine the stats together
+        test_stats = pd.concat([self.dde_genes, null_stats], axis=1).dropna()
 
         if plot:
             self.plot_results(test_stats)
@@ -148,25 +151,125 @@ class DynamicDifferentialExpression(object):
     def load_structures(path):
         return pd.read_csv(path)
 
-    @staticmethod
-    def expected_edges(node_dict, net: nx.DiGraph):
+    def expected_edges(self, node_dict, net: nx.DiGraph):
+        """
+        Calculate expected edges in a "simplified" network based on the true,
+        full network structure
+        :param node_dict: dict; nodes to include in the simplified model
+        :param net: networkX Digraph; true network structure
+        :return: networkX Digraph; the true, simplified structure
+        """
+
+        # Calculate possible edges in the simplified model
         possible_edges = list(it.permutations(node_dict.values(), 2))
+
+        # Initialize an empty graph
         true_graph = nx.DiGraph()
+
+        # For every possible edge, add the edge to the graph if there is path
         for edge in possible_edges:
-            if nx.has_path(net, edge[0], edge[1]):
-                true_graph.add_edge(edge[0], edge[1])
+            src, tgt = edge
+
+            # Save the node not involved in the interaction
+            other_node = [n for n in node_dict.values() if n not in edge][0]
+
+            pl = self.shortest_path_length_exclude(net, src, tgt, other_node)
+
+            if pl > 0:
+                true_graph.add_edge(src, tgt)
+
         return true_graph
 
-    def score_topology(self, true_topology):
+    @staticmethod
+    def shortest_path_length_exclude(g, src, tgt, exclude):
+        try:
+            paths = nx.all_simple_paths(g, src, tgt)
+            lengths = [len(path)-1 for path in paths if exclude not in path]
+            return min(lengths)
+
+        except (nx.NetworkXNoPath, ValueError) as e:
+            return 0
+
+    def score_all_topo(self, true_topology):
         grouped = self.estimators
         ii = 0
         max_edges = 6
         summary = pd.DataFrame()
-        true_topology = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/insilico/strongly_connected/Yeast-100_anonymized.tsv'
         df, dg = tsv_to_dg(true_topology)
         sim_path = '../data/motif_library/gnw_networks/'
         edge_dict = {'x': 'G25', 'G': 'G38'}
+        all_stats = {}
         for gene, data in grouped:
+            print(gene)
+            # Skip control genes for now
+            if gene in edge_dict.values():
+                continue
+            edge_dict['y'] = gene
+            print(self.expected_edges(edge_dict, dg).edges())
+            continue
+            gene_stats = []
+            for id in self.sim_scores.index.get_level_values('id'):
+                topo_path = "{path}/{id}/{id}_goldstandard_signed.tsv".format(path=sim_path,
+                                                                              id=id)
+                _, predicted_structure = tsv_to_dg(topo_path)
+                gene_stats.append(self.calc_topo_stats(predicted_structure, edge_dict, dg, max_edges, id))
+            all_stats[gene] = pd.concat(gene_stats, axis=1)
+        sys.exit()
+        # Create a multiindex
+        all_stats = pd.concat(all_stats.values(), keys=all_stats.keys())
+
+        return all_stats
+
+    def calc_topo_stats(self, predicted_structure, edge_dict, dg, max_edges, id):
+        tg = self.expected_edges(edge_dict, dg)
+        te = len(tg.edges())
+        ne = max_edges - te
+        tp = []
+        fp = 0
+        net_edges = [(edge_dict[e[0]], edge_dict[e[1]]) for e in predicted_structure.edges()]
+        for edge in net_edges:
+            src, tgt = edge
+            try:
+                # Save the node not involved in the interaction
+                other_node = [n for n in edge_dict.values() if n not in edge][0]
+                pl = self.shortest_path_length_exclude(dg, src, tgt, other_node)
+                if pl == 0:
+                    raise nx.NetworkXNoPath
+                tp.append(pl)
+            except nx.NetworkXNoPath:
+                fp += 1
+        fn = 0
+        for edge in tg.edges():
+            if edge not in net_edges:
+                fn += 1
+        tn = max(0, ne - fn)
+        mean_true_path_length = np.mean(tp)
+        ntp = len(tp)
+        gene_stats = [ntp / te, ntp + fp, fp / (ntp + fp), 2 * ntp / (2 * ntp + fp + fn),
+                      (ntp + tn) / (ntp + fp + fn + tn), mean_true_path_length]
+        gene_data = pd.Series(gene_stats, index=['TPR', 'total_edges', 'FDR', 'F1', 'ACC', 'mean_tp_length'])
+        gene_data.name = id
+        return gene_data
+
+    def score_topology(self, true_topology, estimators=None):
+        if estimators is None:
+            grouped = self.estimators
+        else:
+            grouped = estimators
+
+        ii = 0
+        max_edges = 6
+        summary = pd.DataFrame()
+        df, dg = tsv_to_dg(true_topology)
+        sim_path = '../data/motif_library/gnw_networks/'
+        edge_dict = {'x': 'G25', 'G': 'G38'}
+
+        #todo: this needs to be functionalized
+        for gene, data in grouped:
+            # Skip control genes for now
+            if gene in edge_dict.values():
+                continue
+
             edge_dict['y'] = gene
             tg = self.expected_edges(edge_dict, dg)
             te = len(tg.edges())
@@ -179,9 +282,15 @@ class DynamicDifferentialExpression(object):
                 fp = 0
                 net_edges = [(edge_dict[e[0]], edge_dict[e[1]]) for e in net.edges()]
                 for edge in net_edges:
+                    src, tgt = edge
                     try:
-                        tp.append(nx.shortest_path_length(dg, edge[0], edge[1]))
-                    except:
+                        # Save the node not involved in the interaction
+                        other_node = [n for n in edge_dict.values() if n not in edge][0]
+                        pl = self.shortest_path_length_exclude(dg, src, tgt, other_node)
+                        if pl == 0:
+                            raise nx.NetworkXNoPath
+                        tp.append(pl)
+                    except nx.NetworkXNoPath:
                         fp += 1
                 fn = 0
                 for edge in tg.edges():
@@ -200,52 +309,97 @@ class DynamicDifferentialExpression(object):
             gene_mean['true_edges'] = te
             summary = pd.concat([summary, gene_mean], axis=0)
             ii += 1
-        print(summary)
-        colors = qualitative.Bold_10.mpl_colors
-        plt.figure(figsize=(5, 8))
-        sns.set_style("whitegrid")
-        sns.boxplot(data=summary.loc[:, ['TPR', 'FDR', 'ACC', 'F1']], width=0.5, palette=colors, showfliers=False)
-        sns.swarmplot(data=summary.loc[:, ['TPR', 'FDR', 'ACC', 'F1']], color='0.2')
-        # plt.plot([-1,3], [0.5, 0.5], '--', c=colors[2], label='Random')
-        plt.ylim([0, 1])
-        # plt.xticks(rotation='vertical')
-        # plt.ylabel('Value')
-        plt.tight_layout()
-        plt.show()
-        sys.exit()
+        return summary
+        # print(summary)
+        # colors = qualitative.Bold_10.mpl_colors
+        # plt.figure(figsize=(5, 8))
+        # sns.set_style("whitegrid")
+        # sns.boxplot(data=summary.loc[:, ['TPR', 'FDR', 'ACC', 'F1']], width=0.5, palette=colors, showfliers=False)
+        # sns.swarmplot(data=summary.loc[:, ['TPR', 'FDR', 'ACC', 'F1']], color='0.2')
+        # # plt.plot([-1,3], [0.5, 0.5], '--', c=colors[2], label='Random')
+        # plt.ylim([0, 1])
+        # # plt.xticks(rotation='vertical')
+        # # plt.ylabel('Value')
+        # plt.tight_layout()
+        # plt.show()
+        # sys.exit()
 
     @staticmethod
     def plot_results(x):
         print(x)
-        print(stats.wilcoxon(x.mean_lfc_mae, x.random_mae))
-        print(stats.wilcoxon(x.group_mae, x.random_mae))
+        print(np.median(x.grouped_diff), np.mean(x.grouped_diff), stats.wilcoxon(x.grouped_diff).pvalue/2)
+        print(np.median(x.avg_diff), np.mean(x.avg_diff), stats.wilcoxon(x.avg_diff).pvalue/2)
         melted = pd.melt(x, id_vars=x.columns[:-6], value_vars=x.columns[-6:], var_name='stat')
         plt.figure(figsize=(3, 5))
         ax = sns.boxplot(data=melted, x='stat', y='value', notch=True, showfliers=False, width=0.5)
         # sns.swarmplot(data=melted, x='stat', y='value', color='black')
-        ax.set(xticklabels=['mean', 'random', 'grouped'])
-        plt.xticks(rotation=45)
+        ax.set(xticklabels=['mean', 'random_mean','mean_diff', 'grouped', 'random_grouped', 'grouped_diff'])
+        plt.xticks(rotation=90)
         plt.xlabel("")
-        plt.ylabel("")
+        plt.ylabel("Prediction MSE")
         plt.tight_layout()
         plt.show()
         sys.exit()
 
-    def sample_stats(self, df, dist_dict, true_lfc, pred_lfc, resamples=100):
-        random_sample_means = [np.mean(np.random.choice(dist_dict[df.name], len(df))) for _ in range(resamples)]
-        rs_mean = np.median(random_sample_means)
-        x = true_lfc.loc[df.name]
-        mean_lfc_mae = mse(x, pred_lfc.loc[self.estimators.get_group(df.name).index].median(axis=0))
-        random_grouped = [mse(x, pred_lfc.iloc[np.random.randint(0, len(pred_lfc), len(df))].median()) for _ in
-                          range(resamples)]
-        all_model_median = mse(x, pred_lfc.median())
-        all_zeros = mse(x, np.zeros((len(x))))
-        s = pd.Series(
-            [len(df), (rs_mean - df.error.median()) / rs_mean * 100, mean_lfc_mae, rs_mean,
-             df.error.median(), all_model_median, all_zeros, np.mean(random_grouped)],
-            index=['n', 'err_diff', 'mean_lfc_mae', 'random_mae', 'group_mae', 'random_median',
-                   'all_zeros', 'random_grouped'])
+    def sample_stats(self, df, dist_dict, true_lfc, pred_lfc, resamples=100,
+                     err=mse):
+        # For readability
+        gene = df.name
+        models = self.estimators.get_group(gene).index
+        n = len(df)
+
+        # Get the true log fold change for this dataframe
+        test = true_lfc.loc[gene]
+
+        # Get the distribution of errors for all models to this gene
+        e_dist = dist_dict.loc[gene]
+        
+        # Calculate prediction error
+
+        # Group the models log fold change predictions together for each time point
+        # then calculate the error of the 'averaged' model
+        grouped_prediction = pred_lfc.loc[models].median()
+        grouped_error = err(test, grouped_prediction)
+
+        # Average error of each model to the true values
+        avg_error = e_dist.loc[models].median()
+
+        # The dimensions must be consistent
+        assert dist_dict.shape[1] == pred_lfc.shape[0]
+
+        # Get random sample indices
+        rs = np.random.randint(0, len(pred_lfc), (resamples, len(df)))
+
+        # Calculate null models
+        rs_avg_error = [np.median(e_dist.iloc[r]) for r in rs]
+        rg_lfc_error = [err(test, pred_lfc.iloc[r].median()) for r in rs]
+
+
+        # Calculate the average across all the random samples
+        # The average of the medians should be close to the true median
+        rs_median = np.median(rs_avg_error)
+        rg_median = np.median(rg_lfc_error)
+
+        # Error if all log fold change values are assumed to be zero
+        all_zeros = err(test, np.zeros((len(test))))
+        magnitude = err(grouped_prediction, np.zeros(len(grouped_prediction)))
+
+        # Return a series of statistics
+        s_labels = ['n', 'grouped_mag','grouped_e', 'random_grouped_e', 'grouped_diff',
+                    'avg_e', 'random_avg_e', 'avg_diff', 'all_zeros']
+        s_values = [n, magnitude,grouped_error, rg_median, rg_median-grouped_error,
+                    avg_error, rs_median, rs_median-avg_error, all_zeros]
+        s = pd.Series(s_values, index=s_labels)
         return s
+
+    def random_sample(self, df: pd.DataFrame):
+        n_estimators = len(df)
+        possible_estimators = self.sim_stats.index.values
+        random_estimators = np.random.choice(possible_estimators, n_estimators)
+        df.index = pd.MultiIndex.from_tuples(random_estimators,
+                                             names=df.index.names)
+
+        return df
 
     def predict(self, test, prefix, estimators=None, ctrl=None, sim_filter=None,
                 sim_predictions=None, error_func=None):
@@ -320,7 +474,7 @@ class DynamicDifferentialExpression(object):
         return pred
 
     def train(self, data, prefix, times=None, override=False, experimental='ko',
-              control='wt', sim_filter=None, **kwargs):
+              control='wt', sim_experimental='ko', sim_filter=None, **kwargs):
         """
         Train DDE estimators
         :param data:
@@ -367,13 +521,18 @@ class DynamicDifferentialExpression(object):
             dea, scores = self.dde(data, contrast, self.dir, **kwargs)
 
         dde_genes = filter_dde(scores, thresh=2, p=1).sort_values('Cluster', ascending=False)
+
+        # Also filter out genes that dont' pass the basic pairwise test
+        genes = set(dde_genes.index).intersection(dea.results[contrast].top_table(p=0.05).index)
+        dde_genes = dde_genes.loc[genes].copy()
+
         filtered_data = dea.data.loc[:, contrast.split('-')]
 
         if times is None:
             times = dea.times
 
         sim_stats = self.load_sim_stats(sim_path, times,
-                                        experimental=experimental,
+                                        experimental=sim_experimental,
                                         control=control,
                                         **sim_filter)
 

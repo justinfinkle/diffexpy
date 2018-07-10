@@ -81,6 +81,7 @@ if __name__ == '__main__':
     reps = 3
     project_name = 'insilico_strongly_connected'
     data_dir = '../data/insilico/strongly_connected/'
+    true_network = "{}Yeast-100_anonymized.tsv".format(data_dir)
 
     # Keep track of the gene names
     gene_names = pd.read_csv("{}gene_anonymization.csv".format(data_dir), header=None, index_col=0)
@@ -128,9 +129,16 @@ if __name__ == '__main__':
     t_condition = 'ki'  # The test condition
     # predictions, error, sim_pred = dde.predict(t_condition, project_name)
 
-    # stats = dde.score(project_name, t_condition, c_condition)
+    stats = dde.score(project_name, t_condition, c_condition, plot=True)
+    sys.exit()
 
-    # Check structures
-    info = dde.load_structures('../data/motif_library/gnw_networks/simulation_info.csv')
+    # Save topology scores for future testing
+    topo_path = "{}/{}_all_topo.pkl".format(project_name, project_name)
+    # all_topo = dde.score_all_topo(true_network)
+    try:
+        all_topo = pd.read_pickle(topo_path)
+    except FileNotFoundError:
+        all_topo = dde.score_all_topo(true_network)
+        pd.to_pickle(all_topo, topo_path)
 
-    dde.score_topology('pass')
+    print()

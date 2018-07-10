@@ -92,12 +92,12 @@ def group_scores(cluster, de: pd.DataFrame, weighted_de: pd.DataFrame):
     diff = clus_de - clus_wde
     correct_de = ~np.abs(np.sign(clus_wde).values - expected).astype(bool)
     penalty = (correct_de*diff + (~correct_de)*clus_wde).abs().sum(axis=1)
-    score = (correct_de*clus_wde + (~correct_de)*diff).abs().sum(axis=1)
+    reward = (correct_de*clus_wde + (~correct_de)*diff).abs().sum(axis=1)
 
     # scores = np.abs(clus_wde).values * penalty + np.abs(clus_wde).values * (penalty == 0)  # type: np.ndarray
 
     # Calculate fraction of the lfc that was retained
-    score_frac = (score-penalty)/clus_de.abs().sum(axis=1)
+    score_frac = (reward-penalty)/clus_de.abs().sum(axis=1)
     # score_frac = np.sum(scores, axis=1)/np.sum(np.abs(de_df.loc[cluster.index]).values, axis=1)
     # score_frac = 1 - (de.loc[cluster.index] - clus_wde).abs().sum(axis=1) / de.loc[cluster.index].abs().sum(axis=1)
     score_frac.name = 'score'
@@ -228,6 +228,8 @@ class DEResults(MArrayLM):
             # Return the empty dataframe
             pass
 
+        cluster_count.sort_values('Count', ascending=False, inplace=True)
+
         return cluster_count
 
     def top_table(self, use_fstat=None, p=1, n='inf', **kwargs) -> pd.DataFrame:
@@ -350,6 +352,7 @@ class DEAnalysis(object):
         self.conditions = None              # type: list
         self.replicates = None              # type: list
         self.voom = voom                    # type: bool
+        self.voom_results = None
         self.default_contrasts = None
         self.timeseries = False             # type: bool
         self.samples = None                 # type: list
@@ -643,7 +646,7 @@ class DEAnalysis(object):
         if voom:
             r_data = rh.pydf_to_rmat(self.raw)
             voom_results = rh.unpack_r_listvector(limma.voom(r_data, save_plot=True))
-
+            self.voom_results = voom_results
             data = voom_results['E']
 
             # Set the voom data

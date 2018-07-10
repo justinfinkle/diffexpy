@@ -1,9 +1,12 @@
+import sys
 
 from palettable.cartocolors.qualitative import Bold_8
+import numpy as np
 import pandas as pd
 import seaborn as sns
-from pydiffexp import DynamicDifferentialExpression
+from pydiffexp import DynamicDifferentialExpression, DEAnalysis, DEPlot, cluster_discrete
 from pydiffexp.gnw import mk_ch_dir
+import matplotlib.pyplot as plt
 
 
 def load_data(path, bg_shift=True, **kwargs):
@@ -27,6 +30,7 @@ def load_data(path, bg_shift=True, **kwargs):
 
 if __name__ == '__main__':
     sns.set_palette(Bold_8.mpl_colors)
+    colors = Bold_8.mpl_colors[:2]
     # Options
     pd.set_option('display.width', 250)
     override = False  # Rerun certain parts of the analysis
@@ -39,7 +43,6 @@ if __name__ == '__main__':
     """
     # Prep the raw data
     project_name = "GSE69822"
-    contrast = 'ki-wt'
     t = [0, 15, 40, 90, 180, 300]
     raw = load_data('../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt')
     gene_map = pd.read_csv('../data/GSE69822/mcf10a_gene_names.csv', index_col=0)
@@ -56,6 +59,7 @@ if __name__ == '__main__':
     dde = DynamicDifferentialExpression(project_name)
     matches = dde.train(raw, project_name, experimental=e_condition,
                         voom=True)
+
     g = matches.groupby('true_gene')
 
     """
@@ -66,7 +70,7 @@ if __name__ == '__main__':
     t_condition = 'ki'  # The test condition
     # predictions, error, sim_pred = dde.predict(t_condition, project_name)
 
-    dde.score(project_name, t_condition, c_condition)
+    dde.score(project_name, t_condition, c_condition, plot=True)
 
 
 
