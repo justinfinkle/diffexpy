@@ -128,7 +128,7 @@ def make_contingency_table(x, study_list, background_list):
     # Initialize table
     contingency_table = np.zeros((2, 2))
     count_in_study = study_list.count(x)
-    count_in_background = background_list.count(x)-count_in_study
+    count_in_background = max(0, background_list.count(x)-count_in_study)
     contingency_table[0, 0] = count_in_study
     contingency_table[0, 1] = len(study_list) - count_in_study
     contingency_table[1, 0] = count_in_background
