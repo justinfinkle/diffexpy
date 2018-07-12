@@ -17,6 +17,7 @@ if __name__ == '__main__':
     # print(tt)
     # all_stats = pd.read_csv('../intermediate_data/ko-wt_sim_stats_strongly_connected_2_censoredtimes.tsv', sep='\t', index_col=[0,1,2], header=[0,1])
     all_stats = gnr.compile_results(censor_times=t)
+    all_stats.unstack(0).T.to_pickle('all_sim.pkl')
     all_stats.sort_index(inplace=True)
     print(all_stats.loc[0])
     # all_stats.to_csv('../intermediate_data/ko-wt_sim_stats_strongly_connected_2_censoredtimes.tsv', sep='\t')

@@ -67,13 +67,14 @@ def get_stats(df, exp, ctrl, axis=0):
 
 def get_results(fp, experimental, control, sim, p, t):
     id = os.path.basename(os.path.abspath(fp))
-    print(fp)
+    print(id, fp)
     results = pd.DataFrame()
     for stim_type in ['activating', 'deactivating']:
         exp = GnwSimResults(path="{}{}/".format(fp, stim_type), sim_number=id, condition=experimental, sim_suffix=sim, perturb_suffix=p, censor_times=t)
         ctrl = GnwSimResults(path="{}{}/".format(fp, stim_type), sim_number=id, condition=control, sim_suffix=sim, perturb_suffix=p, censor_times=t)
         try:
-            id_results = compare_conditions(exp.data, ctrl.data, id, experimental=experimental, control=control)
+            r = pd.concat([exp.data, ctrl.data])
+            id_results = pd.concat([r], keys=[int(id)], names=['id'])
         except:
             print('error with {}'.format(fp))
             sys.exit(fp)
