@@ -329,11 +329,11 @@ class DynamicDifferentialExpression(object):
         print(x)
         print(np.median(x.grouped_diff), np.mean(x.grouped_diff), stats.wilcoxon(x.grouped_diff).pvalue/2)
         print(np.median(x.avg_diff), np.mean(x.avg_diff), stats.wilcoxon(x.avg_diff).pvalue/2)
-        melted = pd.melt(x, id_vars=x.columns[:-6], value_vars=x.columns[-6:], var_name='stat')
+        melted = pd.melt(x, id_vars=x.columns[:4], value_vars=x.columns[4:10], var_name='stat')
         plt.figure(figsize=(3, 5))
         ax = sns.boxplot(data=melted, x='stat', y='value', notch=True, showfliers=False, width=0.5)
         # sns.swarmplot(data=melted, x='stat', y='value', color='black')
-        ax.set(xticklabels=['mean', 'random_mean','mean_diff', 'grouped', 'random_grouped', 'grouped_diff'])
+        # ax.set(xticklabels=['mean', 'random_mean','mean_diff', 'grouped', 'random_grouped', 'grouped_diff'])
         plt.xticks(rotation=90)
         plt.xlabel("")
         plt.ylabel("Prediction MSE")
@@ -361,6 +361,11 @@ class DynamicDifferentialExpression(object):
         grouped_prediction = pred_lfc.loc[models].median()
         grouped_error = err(test, grouped_prediction)
 
+        # Calculate a predicted cluster
+        nonzero = [stats.ttest_1samp(pred_lfc.loc[models, t], 0).pvalue < 0.05 for t in pred_lfc.columns]
+        grouped_cluster = (np.sign(grouped_prediction)*nonzero).astype(int)
+        grouped_cluster = str(tuple(grouped_cluster.values.tolist()))
+
         # Average error of each model to the true values
         avg_error = e_dist.loc[models].median()
 
@@ -374,11 +379,10 @@ class DynamicDifferentialExpression(object):
         rs_avg_error = [np.median(e_dist.iloc[r]) for r in rs]
         rg_lfc_error = [err(test, pred_lfc.iloc[r].median()) for r in rs]
 
-
         # Calculate the average across all the random samples
         # The average of the medians should be close to the true median
         rs_median = np.median(rs_avg_error)
-        rg_median = np.median(rg_lfc_error)
+        rg_median = np.mean(rg_lfc_error)
 
         # Error if all log fold change values are assumed to be zero
         all_zeros = err(test, np.zeros((len(test))))
@@ -386,9 +390,11 @@ class DynamicDifferentialExpression(object):
 
         # Return a series of statistics
         s_labels = ['n', 'grouped_mag','grouped_e', 'random_grouped_e', 'grouped_diff',
-                    'avg_e', 'random_avg_e', 'avg_diff', 'all_zeros']
+                    'avg_e', 'random_avg_e', 'avg_diff', 'all_zeros', 'abs_dev',
+                    'stdev', 'group_cluster']
         s_values = [n, magnitude,grouped_error, rg_median, rg_median-grouped_error,
-                    avg_error, rs_median, rs_median-avg_error, all_zeros]
+                    avg_error, rs_median, rs_median-avg_error, all_zeros, test.abs().sum(),
+                    test.std(), grouped_cluster]
         s = pd.Series(s_values, index=s_labels)
         return s
 
@@ -490,6 +496,7 @@ class DynamicDifferentialExpression(object):
         :return:
         """
 
+        # Which simulation conditions to look at
         if sim_filter is None:
             sim_filter = self._sim_filter_default()
 
@@ -541,6 +548,8 @@ class DynamicDifferentialExpression(object):
         sim_scores = discretize_sim(sim_stats, filter_interesting=False)
 
         try:
+            if override:
+                raise ValueError('Override to retrain')
             corr = pd.read_pickle(corr_path)
         except:
             corr = self.correlate(filtered_data, sim_stats.loc[sim_scores.index], sim_node='y')
@@ -549,7 +558,7 @@ class DynamicDifferentialExpression(object):
         match = match_to_gene(dde_genes, sim_scores, corr, unique_net=False)
         match.set_index(['id', 'perturbation', 'gene'], inplace=True)
         match.sort_values('mean', ascending=False, inplace=True)
-        match = match[match['mean'] > 0]
+        # match = match[(match['score'] > 0) & (match['pearson_r'] > 0)]
 
         self.times = times
         self.estimators = match.groupby('true_gene')
