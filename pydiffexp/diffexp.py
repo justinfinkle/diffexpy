@@ -12,7 +12,7 @@ import rpy2.robjects as robjects
 import rpy2.robjects.numpy2ri
 from natsort import natsorted
 from pydiffexp.utils import multiindex_helpers as mi
-from pydiffexp.utils import rpy2_helpers as rh
+import r2py_helpers as rh
 from pydiffexp.utils.utils import int_or_float, grepl
 from rpy2.robjects.packages import importr
 
@@ -22,6 +22,7 @@ rpy2.robjects.numpy2ri.activate()
 # Load R packages
 limma = importr('limma')
 stats = importr('stats')
+edgeR = importr('edgeR')
 
 # Set null variable
 null = robjects.r("NULL")
@@ -333,7 +334,7 @@ class DEAnalysis(object):
     """
 
     def __init__(self, df=None, index_names=None, split_str='_', time='time', condition='condition',
-                 replicate='replicate', reference_labels=None, voom=False, log2=True):
+                 replicate='replicate', reference_labels=None, counts=False, log2=True):
         """
 
         :param df:
@@ -351,7 +352,8 @@ class DEAnalysis(object):
         self.times = None                   # type: list
         self.conditions = None              # type: list
         self.replicates = None              # type: list
-        self.voom = voom                    # type: bool
+        self.counts = counts                # type: bool
+        self.dge = None
         self.voom_results = None
         self.default_contrasts = None
         self.timeseries = False             # type: bool
@@ -370,7 +372,7 @@ class DEAnalysis(object):
         if df is not None:
             # Set the data
             self._set_data(df, index_names=index_names, split_str=split_str, reference_labels=reference_labels,
-                           voom=voom, log2=log2)
+                           log2=log2)
 
             # Determine if data is timeseries
             self.times, self.timeseries = self._is_timeseries(time_var=time)
@@ -382,7 +384,7 @@ class DEAnalysis(object):
             # Set default contrasts
             self.default_contrasts = self.possible_contrasts()
 
-    def _set_data(self, df, index_names=None, split_str='_', reference_labels=None, voom=False, log2=True):
+    def _set_data(self, df, index_names=None, split_str='_', reference_labels=None, log2=True):
         """
         Set the data for the DEAnalysis object
         :param df: DataFrame; 
@@ -420,7 +422,7 @@ class DEAnalysis(object):
         # Summarize the data and make data objects for R
         self.experiment_summary = self.get_experiment_summary(reference_labels=reference_labels)
         self.design = self._make_model_matrix()
-        self.data_matrix = self._make_data_matrix(voom=voom, log2=log2)
+        self.data_matrix = self._make_data_matrix(counts=self.counts, log2=log2)
 
     def _is_timeseries(self, time_var=None):
         """
@@ -635,17 +637,39 @@ class DEAnalysis(object):
         design.colnames = robjects.StrVector(str_set)
         return design
 
-    def _make_data_matrix(self, voom, log2=True):
+    def _filter_expression(self, data):
+        """
+        Filter low expressing genes
+        :param data: R data.frame
+        :return:
+        """
+        # Get the groups. Unclear if this is used
+        groups = robjects.FactorVector(self.labels)
+
+        # Make DGEList (Digital Gene Expression) from counts
+        dge = edgeR.DGEList(counts=data, group=groups)
+
+        # Decide which genes to filter
+        keep = edgeR.filterByExpr(dge, self.design)
+
+        # boolean filter, keep all columns, keep.lib.size=False
+        dge = dge.rx(keep, True, False)
+
+        # Renorm
+        dge = edgeR.calcNormFactors(dge)
+
+        return dge
+
+    def _make_data_matrix(self, counts, log2=True):
         """
         Make the data matrix as an R object
         :return:
         """
-        # Get the sample labels, genes, and data
-        genes = self.raw.index.values
 
-        if voom:
+        if counts:
             r_data = rh.pydf_to_rmat(self.raw)
-            voom_results = rh.unpack_r_listvector(limma.voom(r_data, save_plot=True))
+            dge = self._filter_expression(r_data)
+            voom_results = rh.unpack_r_listvector(limma.voom(dge, save_plot=True))
             self.voom_results = voom_results
             data = voom_results['E']
 
@@ -672,6 +696,8 @@ class DEAnalysis(object):
             self.data = data
 
         r_matrix = rh.pydf_to_rmat(data)
+        # Get the sample labels, genes, and data
+        genes = data.index.values
         r_matrix.rownames = robjects.StrVector(genes)
         r_matrix.colnames = robjects.StrVector(self.labels)
         return r_matrix
@@ -718,8 +744,6 @@ class DEAnalysis(object):
         # Subset data and design to match contrast samples
         data = rh.pydf_to_rmat(rh.rvect_to_py(self.data_matrix).loc[:, samples])
         design = self._make_model_matrix(rh.rvect_to_py(data.colnames))
-        # design = rh.rvect_to_py(self.design).loc[:, samples]
-        # design = rh.pydf_to_rmat(design[(design == 1).any(axis=1)])
 
         # Setup contrast matrix
         contrast_robj = self._make_contrasts(contrasts=contrasts, levels=design)

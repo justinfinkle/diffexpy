@@ -18,7 +18,7 @@ raw_data[raw_data <= 0] = 1
 raw_data = raw_data[~(raw_data < 5).all(axis=1)]
 # Make the Differential Expression Analysis Object
 # The reference labels specify how samples will be organized into unique values
-dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition'], time=None, voom=True)
+dea = DEAnalysis(raw_data, index_names=hierarchy, reference_labels=['condition'], time=None, counts=True)
 # Data can be standarized if desired
 # norm_data = dea.standardize()
 
