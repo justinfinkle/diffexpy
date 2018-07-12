@@ -65,15 +65,20 @@ def get_stats(df, exp, ctrl, axis=0):
     return info
 
 
-def get_results(fp, experimental, control, sim, p, t):
+def get_results(fp, conditions, sim, p, t):
     id = os.path.basename(os.path.abspath(fp))
     print(id, fp)
     results = pd.DataFrame()
     for stim_type in ['activating', 'deactivating']:
-        exp = GnwSimResults(path="{}{}/".format(fp, stim_type), sim_number=id, condition=experimental, sim_suffix=sim, perturb_suffix=p, censor_times=t)
-        ctrl = GnwSimResults(path="{}{}/".format(fp, stim_type), sim_number=id, condition=control, sim_suffix=sim, perturb_suffix=p, censor_times=t)
+        path = "{}{}/".format(fp, stim_type)
+        data = []
+        for c in conditions:
+            d = GnwSimResults(path=path, sim_number=id, condition=c,
+                              sim_suffix=sim, perturb_suffix=p, censor_times=t)
+            data.append(d.data)
         try:
-            r = pd.concat([exp.data, ctrl.data])
+
+            r = pd.concat(data)
             id_results = pd.concat([r], keys=[int(id)], names=['id'])
         except:
             print('error with {}'.format(fp))
@@ -108,7 +113,7 @@ class GnwNetResults(object):
         self.experimental = experimental
         self.control = control
 
-    def compile_results(self, censor_times=None, sim_suffix='dream4_timeseries.tsv',
+    def compile_results(self, conditions, censor_times=None, sim_suffix='dream4_timeseries.tsv',
                         perturb_suffix="dream4_timeseries_perturbations.tsv", save_intermediates=False, pp=True):
         """
         Calculate log fold change and corresponding statistics across all networks
@@ -124,7 +129,7 @@ class GnwNetResults(object):
 
         print('Compling results...')
         if pp:
-            pool_args = [(f, self.experimental, self.control, sim_suffix, perturb_suffix, censor_times) for f in
+            pool_args = [(f, conditions, sim_suffix, perturb_suffix, censor_times) for f in
                          self.sim_paths if os.path.isdir(os.path.join(os.path.abspath(f), 'activating',
                                                                       "{}_sim".format(self.experimental)))]
             pool = mp.Pool()

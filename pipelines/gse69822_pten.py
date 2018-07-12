@@ -39,6 +39,13 @@ if __name__ == '__main__':
     ========== Load the data ==========
     ===================================
     """
+    idx = pd.IndexSlice
+    # Load sim data
+    sim_data = pd.read_pickle('../data/motif_library/gnw_networks/all_sim_compiled_for_gse69822.pkl')
+    sim_data = sim_data.loc['y', idx[:, :, 1, :]]
+    sim_data.columns = sim_data.columns.remove_unused_levels()
+    sim_data.columns.set_names(['replicate', 'time'], level=[1, 3], inplace=True)
+
     # Prep the raw data
     project_name = "GSE69822"
     t = [0, 15, 40, 90, 180, 300]
@@ -56,25 +63,9 @@ if __name__ == '__main__':
     # Remove unnecessary data
     basic_data = raw_dea.raw.loc[:, ['ko', 'ki', 'wt']]
 
-    """
-    Clean up the multiindex. This isn't strictly necessary, but makes this a 
-    little cleaner to work with. There are some replicate labels that don't match. 
-    This is probably based on how batch sequencing was done. We aren't doing 
-    paired tests, so it shouldn't matter to change them.
-    """
-
-    # idx = basic_data.columns
-    # idx = idx.remove_unused_levels()
-    # level = 'replicate'
-    # level_index = idx.names.index(level)
-    # replace_labels = {4: 2, 3: 1}
-    # new_labels = [replace_labels[r] if r in replace_labels.keys() else r for r in idx.labels[level_index]]
-    # idx = idx.set_labels(new_labels, level=level)
-    # idx = idx.remove_unused_levels()
-    # replace_levels = {2: 1, 3: 2, 4: 3}
-    # new_level_vals = [replace_levels[r] for r in idx.levels[level_index]]
-    # idx = idx.set_levels(new_level_vals, level=level)
-    # basic_data.columns = idx
+    sim_dea = DEAnalysis(sim_data, reference_labels=contrast_labels, index_names=sample_features)
+    sim_dea.fit_contrasts(sim_dea.default_contrasts['ko-wt']['contrasts'], fit_names='ko-wt')
+    sim_der = sim_dea.results['ko-wt']
 
     """
         ===================================
