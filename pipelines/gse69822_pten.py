@@ -64,8 +64,6 @@ if __name__ == '__main__':
     basic_data = raw_dea.raw.loc[:, ['ko', 'ki', 'wt']]
 
     sim_dea = DEAnalysis(sim_data, reference_labels=contrast_labels, index_names=sample_features)
-    sim_dea.fit_contrasts(sim_dea.default_contrasts['ko-wt']['contrasts'], fit_names='ko-wt')
-    sim_der = sim_dea.results['ko-wt']
 
     """
         ===================================
@@ -78,7 +76,7 @@ if __name__ == '__main__':
 
     override = False  # Rerun certain parts of the analysis
 
-    matches = dde.train(basic_data, project_name, experimental=e_condition,
+    matches = dde.train(basic_data, project_name, sim_dea, experimental=e_condition,
                         counts=True, override=override)
 
     g = matches.groupby('true_gene')

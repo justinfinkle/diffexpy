@@ -102,8 +102,10 @@ class DynamicDifferentialExpression(object):
         self.dea.fit_contrasts(self.dea.default_contrasts[contrast]['contrasts'],
                                fit_names=contrast)
 
-        true_der = self.dea.results[contrast]
+        self.sim_dea.fit_contrasts(self.sim_dea.default_contrasts[contrast]['contrasts'],
+                               fit_names=contrast)
 
+        true_der = self.dea.results[contrast]
         true_lfc = true_der.top_table().iloc[:, :len(self.times)]
 
         if sim_filter is None:
@@ -117,8 +119,9 @@ class DynamicDifferentialExpression(object):
             # Get the predicted values
             sim_predictions = self.load_sim_stats(sim_path, self.times, exp, ctrl,
                                                   **sim_filter)
-
-        pred_lfc = sim_predictions.loc[:, 'lfc']
+        pred_der = self.sim_dea.results[contrast]
+        pred_lfc = pred_der.top_table().iloc[:, :len(self.times)]
+        pred_lfc.index = pred_lfc.index.astype(int)
 
         # Reduce the number of genes to score against, for speed purposes
         if reduced_set:
@@ -126,18 +129,19 @@ class DynamicDifferentialExpression(object):
 
         # Create a dictionary of each simulations prediction to each matched gene
         # This is the distribution of the null model for randomly chosen models
-        gene_err_dist_dict = {ii: [f(pwlfc, twlfc) for pwlfc in pred_lfc.values]
-                              for ii, twlfc in true_lfc.iterrows()}
-
-        gene_to_model_error = pd.DataFrame.from_dict(gene_err_dist_dict,
-                                                     orient='index')
-
-        # Set the columns to match the models
-        gene_to_model_error.columns = pred_lfc.index
+        # gene_err_dist_dict = {ii: [f(pwlfc, twlfc) for pwlfc in pred_lfc.values]
+        #                       for ii, twlfc in true_lfc.iterrows()}
+        #
+        # gene_to_model_error = pd.DataFrame.from_dict(gene_err_dist_dict,
+        #                                              orient='index')
+        #
+        # # Set the columns to match the models
+        # gene_to_model_error.columns = pred_lfc.index
+        gene_to_model_error = pd.read_pickle('gtme.pkl')
 
         # Calculate null model
         null_stats = self.estimators.apply(self.sample_stats, gene_to_model_error,
-                                           true_lfc, pred_lfc)
+                                           true_lfc, pred_lfc, true_der)
 
         # Combine the stats together
         test_stats = pd.concat([self.dde_genes, null_stats], axis=1).dropna()
@@ -341,15 +345,16 @@ class DynamicDifferentialExpression(object):
         plt.show()
         sys.exit()
 
-    def sample_stats(self, df, dist_dict, true_lfc, pred_lfc, resamples=100,
-                     err=mse):
+    def sample_stats(self, df, dist_dict, true_lfc, pred_lfc, true_der,
+                     resamples=100, err=mse):
         # For readability
         gene = df.name
-        models = self.estimators.get_group(gene).index
+        models = df['index'].values.astype(int)
         n = len(df)
 
         # Get the true log fold change for this dataframe
         test = true_lfc.loc[gene]
+        t = test*(1-true_der.p_value.loc[gene])
 
         # Get the distribution of errors for all models to this gene
         e_dist = dist_dict.loc[gene]
@@ -359,9 +364,17 @@ class DynamicDifferentialExpression(object):
         # Group the models log fold change predictions together for each time point
         # then calculate the error of the 'averaged' model
         grouped_prediction = pred_lfc.loc[models].median()
-        grouped_error = err(test, grouped_prediction)
+        try:
+            p = grouped_prediction * (1 - stats.ttest_1samp(pred_lfc.loc[models], 0).pvalue)
+        except:
+            print(n)
+            p = grouped_prediction
+        grouped_error = err(t, grouped_prediction)
+        group_dev = grouped_prediction.abs().sum()
 
         # Calculate a predicted cluster
+
+        n = (1 - stats.ttest_1samp(pred_lfc, 0).pvalue) * pred_lfc.median()
         nonzero = [stats.ttest_1samp(pred_lfc.loc[models, t], 0).pvalue < 0.05 for t in pred_lfc.columns]
         grouped_cluster = (np.sign(grouped_prediction)*nonzero).astype(int)
         grouped_cluster = str(tuple(grouped_cluster.values.tolist()))
@@ -376,13 +389,13 @@ class DynamicDifferentialExpression(object):
         rs = np.random.randint(0, len(pred_lfc), (resamples, len(df)))
 
         # Calculate null models
-        rs_avg_error = [np.median(e_dist.iloc[r]) for r in rs]
-        rg_lfc_error = [err(test, pred_lfc.iloc[r].median()) for r in rs]
+        # rs_avg_error = [np.median(e_dist.iloc[r]) for r in rs]
+        # rg_lfc_error = [err(test, pred_lfc.iloc[r].median()) for r in rs]
 
         # Calculate the average across all the random samples
         # The average of the medians should be close to the true median
-        rs_median = np.median(rs_avg_error)
-        rg_median = np.mean(rg_lfc_error)
+        rs_median = e_dist.median()
+        rg_median = err(t, n)
 
         # Error if all log fold change values are assumed to be zero
         all_zeros = err(test, np.zeros((len(test))))
@@ -390,11 +403,11 @@ class DynamicDifferentialExpression(object):
 
         # Return a series of statistics
         s_labels = ['n', 'grouped_mag','grouped_e', 'random_grouped_e', 'grouped_diff',
-                    'avg_e', 'random_avg_e', 'avg_diff', 'all_zeros', 'abs_dev',
-                    'stdev', 'group_cluster']
-        s_values = [n, magnitude,grouped_error, rg_median, rg_median-grouped_error,
-                    avg_error, rs_median, rs_median-avg_error, all_zeros, test.abs().sum(),
-                    test.std(), grouped_cluster]
+                    'avg_e', 'random_avg_e', 'avg_diff', 'all_zeros', 'abs_dev', 'group_dev',
+                    'group_cluster']
+        s_values = [len(df), magnitude, grouped_error, rg_median, rg_median-grouped_error,
+                    avg_error, rs_median, rs_median-avg_error, all_zeros, t.abs().sum(),
+                    group_dev, grouped_cluster]
         s = pd.Series(s_values, index=s_labels)
         return s
 
@@ -479,7 +492,43 @@ class DynamicDifferentialExpression(object):
         pred = baseline+pred_lfc
         return pred
 
-    def train(self, data, prefix, times=None, override=False, experimental='ko',
+    def join_discrete(self, dea, contrast, exp, ctrl):
+        # Find genes to match
+        p = 0.05
+        # keys = [contrast, "({})_ts".format(contrast), "({})_ar".format(contrast)]
+        pairwise = set(dea.results[contrast].top_table(p=p).index)
+        ar = set(dea.results["({})_ar".format(contrast)].top_table(p=p).index)
+        ts = set(dea.results["({})_ts".format(contrast)].top_table(p=p).index)
+
+        exp_signs = dea.results['{}_ts'.format(exp)].discrete
+        wt_signs = dea.results['{}_ts'.format(ctrl)].discrete
+        exp_signs.columns = dea.times[1:]
+        wt_signs.columns = dea.times[1:]
+
+        diff_signs = np.sign(exp_signs - wt_signs)
+
+        exp_signs = dea.results['{}_ar'.format(exp)].discrete
+        wt_signs = dea.results['{}_ar'.format(ctrl)].discrete
+        exp_signs.columns = dea.times[1:]
+        wt_signs.columns = dea.times[1:]
+
+        ar_signs = np.sign(exp_signs - wt_signs)
+        p_signs = dea.results[contrast].discrete
+
+        merged = pd.concat([p_signs[(p_signs != 0).any(axis=1)],
+                            ar_signs[(ar_signs != 0).any(axis=1)],
+                            diff_signs[(diff_signs != 0).any(axis=1)]],
+                           keys=['pairwise', 'ar', 'ts'],
+                           join='inner', axis=1)
+
+        min_set = set.intersection(*[set(merged.index), pairwise, ar, ts])
+        merged = merged.loc[min_set]
+
+        return cluster_discrete(merged)
+
+
+
+    def train(self, data, prefix, sim_dea, times=None, override=False, experimental='ko',
               control='wt', sim_experimental='ko', sim_filter=None, **kwargs):
         """
         Train DDE estimators
@@ -527,45 +576,54 @@ class DynamicDifferentialExpression(object):
         except (FileNotFoundError, ImportError, ValueError) as e:
             dea, scores = self.dde(data, contrast, self.dir, **kwargs)
 
-        dde_genes = filter_dde(scores, thresh=2, p=1).sort_values('Cluster', ascending=False)
+        # dde_genes = filter_dde(scores, thresh=2, p=1).sort_values('Cluster', ascending=False)
+        #
+        # # Also filter out genes that dont' pass the basic pairwise test
+        # genes = set(dde_genes.index).intersection(dea.results[contrast].top_table(p=0.05).index)
+        # dde_genes = dde_genes.loc[genes].copy()
 
-        # Also filter out genes that dont' pass the basic pairwise test
-        genes = set(dde_genes.index).intersection(dea.results[contrast].top_table(p=0.05).index)
-        dde_genes = dde_genes.loc[genes].copy()
+        dde_genes = self.join_discrete(dea, contrast, experimental, control)
 
         filtered_data = dea.data.loc[:, contrast.split('-')]
 
         if times is None:
             times = dea.times
 
-        sim_stats = self.load_sim_stats(sim_path, times,
-                                        experimental=sim_experimental,
-                                        control=control,
-                                        **sim_filter)
+        sim_dea.fit_contrasts(sim_dea.default_contrasts)
 
-        sim_stats.sort_index(inplace=True)
-
-        sim_scores = discretize_sim(sim_stats, filter_interesting=False)
+        # sim_stats = self.load_sim_stats(sim_path, times,
+        #                                 experimental=sim_experimental,
+        #                                 control=control,
+        #                                 **sim_filter)
+        #
+        # sim_stats.sort_index(inplace=True)
+        #
+        # sim_scores = discretize_sim(sim_stats, filter_interesting=False)
+        sim_dde = self.join_discrete(sim_dea, contrast, experimental, control)
+        # sim_scores = sim_dea.results['ko-wt'].score_clustering()
+        # sim_scores.index = sim_scores.index.astype(int)
 
         try:
             if override:
                 raise ValueError('Override to retrain')
             corr = pd.read_pickle(corr_path)
         except:
-            corr = self.correlate(filtered_data, sim_stats.loc[sim_scores.index], sim_node='y')
+            corr = self.correlate(filtered_data, sim_dea.data.loc[:, contrast.split('-')])
             corr.to_pickle(corr_path)
 
-        match = match_to_gene(dde_genes, sim_scores, corr, unique_net=False)
-        match.set_index(['id', 'perturbation', 'gene'], inplace=True)
-        match.sort_values('mean', ascending=False, inplace=True)
+        # match = match_to_gene(dde_genes, sim_scores, corr, unique_net=False)
+        # # match.set_index(['id', 'perturbation', 'gene'], inplace=True)
+        # match.sort_values('mean', ascending=False, inplace=True)
         # match = match[(match['score'] > 0) & (match['pearson_r'] > 0)]
+        match = match_to_gene(dde_genes, sim_dde)
 
         self.times = times
         self.estimators = match.groupby('true_gene')
         self.match = match
-        self.sim_stats = sim_stats
+        # self.sim_stats = sim_stats
+        self.sim_dea = sim_dea
         self.corr = corr
-        self.sim_scores = sim_scores
+        # self.sim_scores = sim_scores
         self.dea = dea
         self.dde_genes = dde_genes
 
@@ -627,14 +685,17 @@ class DynamicDifferentialExpression(object):
         if sim_node is not None:
             simulated = simulated[simulated.index.get_level_values('gene') == sim_node]
 
-        # todo: remove this inconsistency
-        # Because of how the sim stats are labeled need to agument the conditions
-        # and then remove
-        conditions_labels = ["{}_mean".format(c) for c in self.training.values()]
-        sim_means = simulated.loc[:, conditions_labels]
-        sim_mean_z = sim_means.groupby(level='stat', axis=1).transform(stats.zscore, ddof=1).fillna(0)
-        sim_mean_z.columns.set_levels([c.replace('_mean', "") for c in sim_mean_z.columns.levels[0]], level=0,
-                                      inplace=True)
+        sim_mean = simulated.groupby(level=['condition', 'time'], axis=1).mean()
+        sim_mean_z = sim_mean.groupby(level='condition', axis=1).transform(stats.zscore, ddof=1).fillna(0)
+
+        # # todo: remove this inconsistency
+        # # Because of how the sim stats are labeled need to agument the conditions
+        # # and then remove
+        # conditions_labels = ["{}_mean".format(c) for c in self.training.values()]
+        # sim_means = simulated.loc[:, conditions_labels]
+        # sim_mean_z = sim_means.groupby(level='stat', axis=1).transform(stats.zscore, ddof=1).fillna(0)
+        # sim_mean_z.columns.set_levels([c.replace('_mean', "") for c in sim_mean_z.columns.levels[0]], level=0,
+        #                               inplace=True)
         corr = []
         for c in self.training.values():
             print('Computing pairwise for {}'.format(c))
@@ -730,7 +791,7 @@ def compress_directory(directory, source='.'):
 def fit_dea(data, default_contrast, **kwargs):
     # Create and fit analysis object
     dea = DEAnalysis(data, **kwargs)
-    dea.fit_contrasts(dea.default_contrasts[default_contrast]['contrasts'], fit_names=default_contrast)
+    dea.fit_contrasts(dea.default_contrasts)
     der = dea.results[default_contrast]  # type: DEResults
     scores = der.score_clustering()
     return dea, scores
@@ -812,25 +873,32 @@ def display_sim(network, stim, perturbation, times, directory, exp_condition='ko
     draw_results(np.log2(data+1), perturbation, titles, times=times, g=dg)
     plt.tight_layout()
 
-
-def match_to_gene(x, y, correlation, unique_net=True):
+def match_to_gene(data, sim):
     matching_results = pd.DataFrame()
-    for gene, row in x.iterrows():
-        candidate_nets = y.loc[y.Cluster == row.Cluster]
-        cur_corr = correlation.loc[gene, candidate_nets.index]
-        cur_corr.name = 'pearson_r'
-        ranking = pd.concat([candidate_nets, cur_corr], axis=1)
-        ranking['mean'] = (ranking['score'] + ranking['pearson_r']) / 2
-        ranking = ranking.loc[ranking.index.get_level_values(2) == 'y'].copy()
-
-        # Remove same network ids that are just different perturbations
-        if unique_net:
-            sorted_ranking = ranking.sort_values('mean', ascending=False)
-            ranking = sorted_ranking[~sorted_ranking.index.get_level_values('id').duplicated(keep='first')].copy()
-        ranking['true_gene'] = gene
-        matching_results = pd.concat([matching_results, ranking.reset_index()], ignore_index=True)
-
+    for gene, row in data.iterrows():
+        candidate_nets = sim.loc[sim.Cluster == row.Cluster]
+        candidate_nets['true_gene'] = gene
+        matching_results = pd.concat([matching_results])
     return matching_results
+
+# def match_to_gene(x, y, correlation, unique_net=True):
+#     matching_results = pd.DataFrame()
+#     for gene, row in x.iterrows():
+#         candidate_nets = y.loc[y.Cluster == row.Cluster]
+#         cur_corr = correlation.loc[gene, candidate_nets.index.values]
+#         cur_corr.name = 'pearson_r'
+#         ranking = pd.concat([candidate_nets, cur_corr], axis=1)
+#         ranking['mean'] = (ranking['score'] + ranking['pearson_r']) / 2
+#         # ranking = ranking.loc[ranking.index.get_level_values(2) == 'y'].copy()
+#
+#         # Remove same network ids that are just different perturbations
+#         if unique_net:
+#             sorted_ranking = ranking.sort_values('mean', ascending=False)
+#             ranking = sorted_ranking[~sorted_ranking.index.get_level_values('id').duplicated(keep='first')].copy()
+#         ranking['true_gene'] = gene
+#         matching_results = pd.concat([matching_results, ranking.reset_index()], ignore_index=True)
+#
+#     return matching_results
 
 
 def compile_match_sim_data(matching, base_dir, condition='ki', times=None):

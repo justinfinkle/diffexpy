@@ -229,7 +229,11 @@ class DEResults(MArrayLM):
             # Return the empty dataframe
             pass
 
-        cluster_count.sort_values('Count', ascending=False, inplace=True)
+        try:
+            cluster_count.sort_values('Count', ascending=False, inplace=True)
+        except KeyError:
+            # Return the empty dataframe
+            pass
 
         return cluster_count
 
