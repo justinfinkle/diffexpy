@@ -5,6 +5,7 @@ from collections import Counter
 import matplotlib as mpl
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 import palettable.colorbrewer as cbrewer
 import pandas as pd
@@ -556,9 +557,20 @@ class DEPlot(object):
                     point_set[3] = np.array([point_set[0][0], point_set[0][1] + mass])
                     point_set[2] = np.array([point_set[1][0], point_set[1][1] + mass])
 
+                    # Up or down needed?
+                    if (point_set[0][1] - point_set[1][1]) > 0:
+                        # Down
+                        point_set = np.roll(point_set, -1, axis=0)
+                    elif (point_set[0][1] - point_set[1][1]) < 0:
+                        # Up
+                        # Switch point zero and point two
+                        zero = point_set[0].copy()
+                        point_set[0] = point_set[2]
+                        point_set[2] = zero
+
                     polys[(step, level)] = patches.Polygon(np.array(point_set))
-                    ax.add_patch(patches.Polygon(np.array(point_set), fc=display[flow[1]],
-                                                 alpha=flow_alpha, edgecolor='none'))
+                    ax.add_patch(patches.PathPatch(self.make_curve_path(point_set), fc=display[flow[1]],
+                                                   alpha=flow_alpha, edgecolor='none'))
                 elif dir != 'over' and seg[poly_dict[dir][0]] < seg[poly_dict[dir][1]]:  # Plot up or down polygons
                     try:
                         # Get reference points from appropriate node objects.
@@ -705,8 +717,31 @@ class DEPlot(object):
             self.horizontal_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='over')  # plot rectangles
 
             # Resize y axis if necessary
-            y_min, y_max = min(path_min - 0.1, y_min), max(path_max + 0.1, y_max)
+            y_min, y_max = min(path_min - 0.2, y_min), max(path_max + 0.2, y_max)
             ax.set_ylim([y_min, y_max])
+
+            # Set integer ticks
+            ax.set_yticks(range(path_min, path_max+1))
+
+            # Make legend
+            # todo: better functionalization of this
+            ll = len(path_df)
+            max_width = round(ll, -int(np.floor(np.log10(ll))))
+            leg_labels = np.linspace(1, max_width, 5).astype(int)
+            t = ax.transData.transform([(0, 0), (1, 1)])
+            h = t[1, 1] - t[0, 1]
+            ppi = ax.get_figure().get_dpi() / 72
+
+            leg_lines = [Line2D([0], [0], color=colors, lw=max(1, (l / ll) * (h / ppi)), solid_capstyle='butt') for l in leg_labels]
+            max_in_ppi = leg_lines[-1].get_linewidth() / ppi
+            aspect_ratio = 2   # width/height
+            legend_font = mpl.rcParams['legend.fontsize']
+
+            # Put the center left of the legend at the x,y position [1, 0.5] of the axes
+            ax.legend(leg_lines, leg_labels, loc='center left', bbox_to_anchor=([1, 0.5]),
+                      labelspacing=max_in_ppi/legend_font,
+                      handlelength=max_in_ppi*aspect_ratio/legend_font)
+
             return
 
         for s, c, a, p in zip(sets, colors, alphas, paths):

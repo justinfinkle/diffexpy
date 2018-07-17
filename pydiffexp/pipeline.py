@@ -563,7 +563,7 @@ class DynamicDifferentialExpression(object):
         if times is None:
             times = dea.times
 
-        sim_dea.fit_contrasts(sim_dea.default_contrasts['ko-wt']['contrasts'], fit_names='ko-wt')
+        sim_dea.fit_contrasts(sim_dea.default_contrasts)
 
         # sim_stats = self.load_sim_stats(sim_path, times,
         #                                 experimental=sim_experimental,
@@ -574,7 +574,7 @@ class DynamicDifferentialExpression(object):
         #
         # sim_scores = discretize_sim(sim_stats, filter_interesting=False)
 
-        sim_scores = sim_dea.results['ko-wt'].score_clustering()
+        sim_scores = sim_dea.results[contrast].score_clustering()
         sim_scores.index = sim_scores.index.astype(int)
 
         try:
@@ -788,7 +788,8 @@ def filter_dde(df, col='Cluster', thresh=2, p=0.05, s=0):
     e.g. thresh=2 and Cluster = (1,1,1,1) will have only 1 unique label, and will be filtered out.
     :param df:
     :param col:
-    :param thresh:
+    :param s: score threshold
+    :param thresh: number of different LFCs
     :return:
     """
     df = df.loc[df[col].apply(ast.literal_eval).apply(set).apply(len) >= thresh]
