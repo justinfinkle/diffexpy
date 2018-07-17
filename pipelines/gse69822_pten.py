@@ -40,11 +40,12 @@ if __name__ == '__main__':
     ===================================
     """
     idx = pd.IndexSlice
-    # Load sim data
+    # Load sim data and cleanup appropriately
     sim_data = pd.read_pickle('../data/motif_library/gnw_networks/all_sim_compiled_for_gse69822.pkl')
     sim_data = sim_data.loc['y', idx[:, :, 1, :]]
     sim_data.columns = sim_data.columns.remove_unused_levels()
     sim_data.columns.set_names(['replicate', 'time'], level=[1, 3], inplace=True)
+    sim_data.columns.set_levels(['ki', 'pten', 'wt'], level=0, inplace=True)
 
     # Prep the raw data
     project_name = "GSE69822"
@@ -60,37 +61,71 @@ if __name__ == '__main__':
     sample_features = ['condition', 'replicate', 'time']
     raw_dea = DEAnalysis(raw, reference_labels=contrast_labels, index_names=sample_features)
 
-    # Remove unnecessary data
-    basic_data = raw_dea.raw.loc[:, ['ko', 'ki', 'wt']]
-
-    sim_dea = DEAnalysis(sim_data, reference_labels=contrast_labels, index_names=sample_features)
+    # sim_dea = DEAnalysis(sim_data, reference_labels=contrast_labels, index_names=sample_features)
 
     """
         ===================================
         ============= Training ============
         ===================================
     """
-    e_condition = 'ko'  # The experimental condition used
+    e_condition = 'pten'  # The experimental condition used
     c_condition = 'wt'  # The control condition used
-    dde = DDE(project_name)
 
-    override = False  # Rerun certain parts of the analysis
+    # Remove unnecessary data
+    basic_data = raw_dea.raw.loc[:, [e_condition, c_condition]]
+    contrast = "{}-{}".format(e_condition, c_condition)
+    # dde = DDE(project_name)
 
-    matches = dde.train(basic_data, project_name, sim_dea, experimental=e_condition,
-                        counts=True, override=override)
+    # override = False    # Rerun certain parts of the analysis
+    #
+    # matches = dde.train(basic_data, project_name, sim_dea, experimental=e_condition,
+    #                     counts=True, override=override)
 
-    g = matches.groupby('true_gene')
-    # sys.exit()
+    # dea = DEAnalysis(basic_data, reference_labels=contrast_labels, index_names=sample_features,
+    #                  counts=True, log2=False)
+    # dea.fit_contrasts(dea.default_contrasts)
+    # dea.to_pickle('GSE69822/GSE69822_ki-wt_dea.pkl')
+    dea = pd.read_pickle('GSE69822/GSE69822_{}_dea.pkl'.format(contrast))
+    dep = DEPlot()
 
-    """
-        ====================================
-        ============= TESTING ==============
-        ====================================
-    """
-    t_condition = 'ki'  # The test condition
-    # predictions, error, sim_pred = dde.predict(t_condition, project_name)
+    der = dea.results['{}'.format(contrast)]
+    ts_der = dea.results['({})_ts'.format(contrast)]
+    ar_der = dea.results['({})_ar'.format(contrast)]
+    wt_ts_der = dea.results['{}_ts'.format(c_condition)]
+    exp_ts_der = dea.results['{}_ts'.format(e_condition)]
 
-    dde.score(project_name, t_condition, c_condition, plot=True)
+    p = 0.05
+    pairwise = set(der.top_table(p=p).index)
+    dde_genes = set(dde.dde_genes.index)
+    ar_signs = ar_der.decide_tests()
+    ar_genes = set(ar_signs[(ar_signs != 0).any(axis=1)].index)
+    ts_signs = ts_der.decide_tests()
+    ts_genes = set(ts_signs[(ts_signs != 0).any(axis=1)].index)
 
+    ar_signs = dea.results['({})_ar'.format(contrast)].discrete
+    ar_path_df = ar_signs[(ar_signs != 0).any(axis=1)]
+
+    pten_signs = exp_ts_der.discrete
+    wt_signs = wt_ts_der.discrete
+    pten_signs.columns = dea.times[1:]
+    wt_signs.columns = dea.times[1:]
+
+    diff_signs = np.sign(pten_signs - wt_signs)
+
+    ts_diff_signs = diff_signs.loc[ts_der.top_table(p=0.05).index]
+    ts_path_df = np.cumsum(np.sign(ts_diff_signs[(ts_diff_signs != 0).any(axis=1)]), axis=1)
+
+    ts_path_df.insert(0, 0, 0)
+    ts_path_df.columns = [0, 15, 40, 90, 180, 300]
+    print(ts_path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
+    fig = plt.figure(figsize=(10, 7.5))
+    ax = fig.add_axes([0.1, 0.1, 0.6, 0.85])
+    dep.plot_flows(ax, ['diff'], [Bold_8.mpl_colors[0]], [1], ['all'],
+                   x_coords=ts_path_df.columns, min_sw=0.01, max_sw=1,
+                   uniform=False, path_df=ts_path_df, node_width=10)
+    plt.xlabel('Time (min)')
+    plt.ylabel('Cumulative Trajectory Differences')
+    plt.tight_layout()
+    plt.show()
 
 
