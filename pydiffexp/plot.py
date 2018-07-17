@@ -663,7 +663,7 @@ class DEPlot(object):
         return Path(verts, codes)
 
     def plot_flows(self, ax, sets, colors, alphas, paths, max_sw=1, min_sw=0.01, node_width=None, x_coords=None,
-                   uniform=False, path_df=None, genes=None, norm=None):
+                   uniform=False, path_df=None, genes=None, norm=None, legend=True):
         """
         Plots a Sankey-like flow figure
 
@@ -724,23 +724,27 @@ class DEPlot(object):
             ax.set_yticks(range(path_min, path_max+1))
 
             # Make legend
-            # todo: better functionalization of this
-            ll = len(path_df)
-            max_width = round(ll, -int(np.floor(np.log10(ll))))
-            leg_labels = np.linspace(1, max_width, 5).astype(int)
-            t = ax.transData.transform([(0, 0), (1, 1)])
-            h = t[1, 1] - t[0, 1]
-            ppi = ax.get_figure().get_dpi() / 72
+            if legend:
+                # todo: better functionalization of this
+                ll = len(path_df)
 
-            leg_lines = [Line2D([0], [0], color=colors, lw=max(1, (l / ll) * (h / ppi)), solid_capstyle='butt') for l in leg_labels]
-            max_in_ppi = leg_lines[-1].get_linewidth() / ppi
-            aspect_ratio = 2   # width/height
-            legend_font = mpl.rcParams['legend.fontsize']
+                # Make the legend labels
+                # Split into groups and round to the nearest 10^i place
+                leg_labels = np.array([round(l, -(int(np.log10(ll))-1)) for l in np.linspace(1, ll, 5)]).astype(int)
 
-            # Put the center left of the legend at the x,y position [1, 0.5] of the axes
-            ax.legend(leg_lines, leg_labels, loc='center left', bbox_to_anchor=([1, 0.5]),
-                      labelspacing=max_in_ppi/legend_font,
-                      handlelength=max_in_ppi*aspect_ratio/legend_font)
+                t = ax.transData.transform([(0, 0), (1, 1)])
+                h = t[1, 1] - t[0, 1]
+                ppi = ax.get_figure().get_dpi() / 72
+
+                leg_lines = [Line2D([0], [0], color=colors, lw=max(1, (l / ll) * (h / ppi)), solid_capstyle='butt') for l in leg_labels]
+                max_in_ppi = leg_lines[-1].get_linewidth() / ppi
+                aspect_ratio = 2   # width/height
+                legend_font = mpl.rcParams['legend.fontsize']
+
+                # Put the center left of the legend at the x,y position [1, 0.5] of the axes
+                ax.legend(leg_lines, leg_labels, loc='center left', bbox_to_anchor=([1, 0.5]),
+                          labelspacing=max_in_ppi/legend_font,
+                          handlelength=max_in_ppi*aspect_ratio/legend_font)
 
             return
 
