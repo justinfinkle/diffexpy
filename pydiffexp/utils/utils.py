@@ -1,5 +1,7 @@
 from functools import singledispatch
 import pandas as pd
+from itertools import chain
+import string
 
 @singledispatch
 def grepl(substr, search_list):
@@ -63,3 +65,40 @@ def column_unique(x):
         df[data.name] = data.value_counts()
     return df
 
+
+def all_subsets(groups, labels=None):
+    """
+    Find all subsets of groups
+
+    Adapted from get_labels in venn diagram package
+    https://github.com/tctianchi/pyvenn/blob/master/venn.py
+
+    :param groups: iterable of iterables
+    :return:
+    """
+    if labels is None:
+        labels = list(string.ascii_uppercase[:len(groups)])
+
+    n = len(groups)
+
+    # Make all groupings into sets
+    sets_data = [set(g) for g in groups]
+
+    # Master lits
+    s_all = set(chain(*groups))
+
+    # bin(3) --> '0b11', so bin(3).split('0b')[-1] will remove "0b"
+    set_collections = {}
+    for ii in range(1, 2 ** n):
+        key = bin(ii).split('0b')[-1].zfill(n)
+        value = s_all
+        sets_for_intersection = [sets_data[i] for i in range(n) if key[i] == '1']
+        sets_for_difference = [sets_data[i] for i in range(n) if key[i] == '0']
+        for s in sets_for_intersection:
+            value = value & s
+        for s in sets_for_difference:
+            value = value - s
+        dict_key = '∩'.join([labels[i] for i in range(n) if key[i] == '1'])
+        set_collections[dict_key] = len(value)
+
+    return pd.DataFrame(pd.Series(set_collections), columns=['values']).reset_index()
