@@ -13,7 +13,12 @@ from palettable.cartocolors.qualitative import Bold_8, Prism_10
 from goatools.obo_parser import GODag
 from goatools import GOEnrichmentStudy
 from scripts.go_enrichment import check_enrichment
+import r2py_helpers as rh
+import rpy2.robjects as robj
+from rpy2.robjects.packages import importr
 
+# Import discrete goodness of fit
+dgof = importr('dgof')
 
 def load_data(path, bg_shift=True, **kwargs):
     """
@@ -56,6 +61,29 @@ def read_associations(assoc_fn):
         assoc[a] = b
 
     return assoc
+
+
+def d_ks_test(x, y, **kwargs):
+    """
+    Discrete ks test from R package dgof
+    :param x:
+    :param y:
+    :param kwargs:
+    :return:
+    """
+    kwargs.setdefault('simulate_p_value', True)
+    kwargs.setdefault('alternative', 'less')
+
+    # Cast to integer first so r doesn't crash
+    x = np.array(x).astype(int)
+    y = np.array(y).astype(int)
+
+    x = robj.IntVector(x)
+    y = robj.IntVector(y)
+    results = dgof.ks_test(x, y, **kwargs)
+    results = rh.rvect_to_py(results)
+    return results['p_value']
+
 
 if __name__ == '__main__':
     # Set globals
@@ -192,6 +220,19 @@ if __name__ == '__main__':
     term_sizes, term_collections = all_subsets([go_enrich['degs'], go_enrich['ddegs'], go_enrich['drgs']],
                                            ['degs', 'ddegs', 'drgs'])
 
+    x = pd.DataFrame()
+    for gc, terms in term_collections.items():
+        for t in terms:
+            x = x.append(pd.Series([gc, obo_dag.query_term(t).depth],
+                                   index=['gene class', 'term depth'], name=t))
+
+    g = x.groupby('gene class')
+    print(d_ks_test(g.get_group('degs')['term depth'].values, x['term depth'].values))
+    print(d_ks_test(g.get_group('drgs')['term depth'].values, x['term depth'].values))
+    print(d_ks_test(g.get_group('ddegs')['term depth'].values, x['term depth'].values))
+    print(d_ks_test(g.get_group('degs∩drgs')['term depth'].values, x['term depth'].values))
+    sys.exit()
+
     # tf_sizes, tf_collections = all_subsets([tf_sets['degs'], tf_sets['ddegs'], tf_sets['drgs']],
     #                                        ['degs', 'ddegs', 'drgs'])
     # print(tf_sizes)
@@ -284,12 +325,6 @@ if __name__ == '__main__':
     # gene_ax.set_title(gene_ax.get_xlabel())
     # gene_ax.set_xlabel('')
 
-    x = pd.DataFrame()
-    for gc, terms in term_collections.items():
-        for t in terms:
-            x = x.append(pd.Series([gc, obo_dag.query_term(t).depth],
-                                   index=['gene class', 'term depth'], name=t))
-
     c_index = [1, 7, 5, 9, 3, 6]
     colors = [Prism_10.mpl_colors[idx] for idx in c_index] + ['k', '0.5']
     cmap = {gc: colors[ii] for ii, gc in enumerate(index_order)}
@@ -317,7 +352,7 @@ if __name__ == '__main__':
     # tf_ax.set_ylabel('')
     # tf_ax.set_xlabel('')
     plt.tight_layout()
-    plt.savefig('pten_gene_classification.pdf')
+    # plt.savefig('pten_gene_classification.pdf')
     sys.exit()
 
     # Set the type of plot to display
