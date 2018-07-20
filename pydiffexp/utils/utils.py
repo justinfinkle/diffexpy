@@ -99,6 +99,9 @@ def all_subsets(groups, labels=None):
         for s in sets_for_difference:
             value = value - s
         dict_key = '∩'.join([labels[i] for i in range(n) if key[i] == '1'])
-        set_collections[dict_key] = len(value)
+        set_collections[dict_key] = value
 
-    return pd.DataFrame(pd.Series(set_collections), columns=['values']).reset_index()
+    set_sizes = {k: len(v) for k, v in set_collections.items()}
+    set_sizes = pd.DataFrame(pd.Series(set_sizes), columns=['size'])
+
+    return set_sizes, set_collections

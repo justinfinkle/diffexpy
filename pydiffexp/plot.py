@@ -291,48 +291,32 @@ class DEPlot(object):
         ax.set_title(gene)
         return ax
 
-    def heatmap(self):
-        der = self.dea.results['KO-WT']
+    def heatmap(self, df, hash_df, row_norm='max', hm_ax=None, hash_ax=None, **kwargs):
         cmap = sns.diverging_palette(30, 260, s=80, l=55, as_cmap=True)
-        # np.random.seed(8)
-        # idx = np.random.randint(0, len(self.dea.results['KO-WT'].top_table(p=0.05)), size=100)
-        df = der.top_table(p=0.05)
-        clusters = der.cluster_discrete(der.decide_tests(p_value=0.05)).loc[df.index]
-        df = pd.concat([df, clusters], axis=1)   # type: pd.DataFrame
-        df.sort_values(['Cluster', 'adj_pval', 'AveExpr'], inplace=True, ascending=[True, True, False])
-        feedback_lost = df[(df.Cluster=='(0, 0, 0, 1, 1)') | (df.Cluster=='(0, 0, 1, 1, 1)') |
-                           (df.Cluster=='(0, 1, 1, 1, 1)') ].sort_values('adj_pval')
+        # df = df.loc[[g in set.union(*hash_labels) for g in df.index]]
 
-        # print(feedback_lost)
-        # print(feedback_lost.shape)
-        # for g in feedback_lost.index:
-        #     print(g)
-        #     # self.tsplot(self.dea.data.loc[g])
-        #     # plt.show()
-        # sys.exit()
-        # c_groups = df.groupby('Cluster')
-        # for c, group in c_groups:
-        #     for g in group.index:
-        #         print(g)
-        #     print(c, len(group))
-        #     print('\n', '\n')
-        #     input()
-        #     print('got it')
-        # sys.exit()
-        # # print(df)
-        # # sys.exit()
-        df = df.loc[self.dea.results['KO-WT'].discrete_clusters.loc[df.index].sort_values('Cluster').index]
-        hm_data = df.iloc[:, :5]
-        hm_data = np.abs(der.discrete.loc[df.index].values)*hm_data
-        hm_data = hm_data[~(hm_data == 0).all(axis=1)].iloc[::-1]
-        hm_data = (hm_data.divide(np.max(np.abs(hm_data), axis=1), axis=0))
-        # hm_data = hm_data.apply(stats.zscore, axis=1, ddof=1)
+        if row_norm == 'max':
+            df = df.divide(df.abs().max(axis=1), axis=0)
+        elif row_norm == 'zscore':
+            df = stats.zscore(df, ddof=1, axis=1)
 
-        hm_data.columns = [0, 15, 60, 120, 240]
-        zeros = hm_data.values == 0
-        g = sns.clustermap(hm_data, cmap=cmap, col_cluster=False, row_cluster=False, figsize=(5, 10))#, mask=zeros)
-        plt.setp(g.ax_heatmap.yaxis.get_majorticklabels(), rotation=0)
-        g.ax_heatmap.yaxis.set_visible(False)
+        # fig = plt.figure(figsize=(4, 8))
+
+        # The specifiers for the axes
+        # left, bottom, width, height = (0.1, 0.1, 0.7, 0.8)
+        # hm_ax = fig.add_axes([left, bottom, width, height])
+        hm_ax = sns.heatmap(df, cmap=cmap, ax=hm_ax, cbar=True, **kwargs)
+        hm_ax.set_xticklabels(hm_ax.get_xticklabels(), rotation=90)
+
+        # Make hashes
+        # hash_ax = fig.add_axes([0.81, 0.1, 0.05, 0.8])
+        mask = hash_df == 0
+        hash_ax = sns.heatmap(hash_df, ax=hash_ax, vmin=0, vmax=1,
+                              cmap=['w', 'k'], cbar=False, yticklabels=False,
+                              xticklabels=True, mask=mask)
+        hash_ax.set_xticklabels(hash_ax.get_xticklabels(), rotation=90)
+        hash_ax.set_ylabel('')
+        return hm_ax, hash_ax
 
 
     def make_path_dict(self, condition, max_sw, min_sw=0.0, path='all', dc_df=None, genes=None, norm=None):
