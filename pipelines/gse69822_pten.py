@@ -1,18 +1,19 @@
 import sys
+from collections import OrderedDict
+
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from scipy import stats
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from pydiffexp import DEAnalysis, DEPlot, DEResults, cluster_discrete
+from pydiffexp import DEAnalysis, DEPlot, DEResults
 from pydiffexp.utils import all_subsets
-from pydiffexp.utils import fisher_test as ft
-from pipeline import DynamicDifferentialExpression as DDE
+from pydiffexp.utils import multiindex_helpers as mi
 from pipeline import filter_dde
 from palettable.cartocolors.qualitative import Bold_8, Prism_10
 from goatools.obo_parser import GODag
 from goatools import GOEnrichmentStudy
-from scripts.go_enrichment import check_enrichment
 import r2py_helpers as rh
 import rpy2.robjects as robj
 from rpy2.robjects.packages import importr
@@ -20,7 +21,8 @@ from rpy2.robjects.packages import importr
 # Import discrete goodness of fit
 dgof = importr('dgof')
 
-def load_data(path, bg_shift=True, **kwargs):
+
+def load_data(path, mi_level_names, bg_shift=True,**kwargs):
     """
 
     :param path:
@@ -36,7 +38,10 @@ def load_data(path, bg_shift=True, **kwargs):
 
     if bg_shift:
         raw_data[raw_data <= 0] = 1
-    return raw_data
+
+    df = mi.make_multiindex(raw_data, index_names=mi_level_names)
+
+    return df
 
 
 def write_gene_list(genes, path):
@@ -85,178 +90,89 @@ def d_ks_test(x, y, **kwargs):
     return results['p_value']
 
 
-if __name__ == '__main__':
-    # Set globals
-    sns.set_palette(Bold_8.mpl_colors)
-    pd.set_option('display.width', 250)
+def plot_cluster_term_figure():
+    pass
 
-    plot_mean_variance = False
 
+def load_sim_data(compiled_path):
+    # todo: needs to be fully functionalized
     """
-    ===================================
-    ========== Load the data ==========
-    ===================================
+    Load simulation data to match
+    :param compiled_path:
+    :return:
     """
     idx = pd.IndexSlice
     # Load sim data and cleanup appropriately
-    sim_data = pd.read_pickle('../data/motif_library/gnw_networks/all_sim_compiled_for_gse69822.pkl')
+    sim_data = pd.read_pickle(compiled_path)
     sim_data = sim_data.loc['y', idx[:, :, 1, :]]
     sim_data.columns = sim_data.columns.remove_unused_levels()
     sim_data.columns.set_names(['replicate', 'time'], level=[1, 3], inplace=True)
     sim_data.columns.set_levels(['ki', 'pten', 'wt'], level=0, inplace=True)
 
-    # Prep the raw data
-    project_name = "GSE69822"
-    t = [0, 15, 40, 90, 180, 300]
-    raw = load_data('../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt')
-    ensembl_to_hgnc = pd.read_csv('../data/GSE69822/mcf10a_gene_names.csv', index_col=0)
-    hgnc_to_ensembl = ensembl_to_hgnc.reset_index().set_index('hgnc_symbol')
-    gene_dict = pd.read_pickle('../data/tf_associations/human_encode_associations.pkl')
+    sim_dea = DEAnalysis(sim_data, reference_labels=contrast_labels, index_names=sample_features)
+    return sim_dea
 
-    # Labels that can be used when making DE contrasts used by limma. This helps with setting defaults
-    contrast_labels = ['condition', 'time']
 
-    # Features of the samples taken that are used in calculating statistics
-    sample_features = ['condition', 'replicate', 'time']
-    raw_dea = DEAnalysis(raw, reference_labels=contrast_labels, index_names=sample_features)
-
-    # sim_dea = DEAnalysis(sim_data, reference_labels=contrast_labels, index_names=sample_features)
-
+def fit_dea(path, override=False, **dea_kwargs):
     """
-        ===================================
-        ============= Training ============
-        ===================================
+
+    :param path:
+    :param override:
+    :return:
     """
-    e_condition = 'pten'  # The experimental condition used
-    c_condition = 'wt'  # The control condition used
+    dea_kwargs.setdefault('counts', True)
+    dea_kwargs.setdefault('log2', False)
 
-    # Remove unnecessary data
-    basic_data = raw_dea.raw.loc[:, [e_condition, c_condition]]
-    contrast = "{}-{}".format(e_condition, c_condition)
-    # dde = DDE(project_name)
+    try:
+        if override:
+            raise ValueError('Override to retrain')
+        dea = pd.read_pickle(path)
+    except (FileNotFoundError, ValueError) as e:
+        dea = DEAnalysis(basic_data, **dea_kwargs)
+        dea.fit_contrasts(dea.default_contrasts)
+        dea.to_pickle(path)
+    return dea
 
-    # override = False    # Rerun certain parts of the analysis
-    #
-    # matches = dde.train(basic_data, project_name, sim_dea, experimental=e_condition,
-    #                     counts=True, override=override)
 
-    # dea = DEAnalysis(basic_data, reference_labels=contrast_labels, index_names=sample_features,
-    #                  counts=True, log2=False)
-    # dea.fit_contrasts(dea.default_contrasts)
-    # dea.to_pickle('GSE69822/GSE69822_ki-wt_dea.pkl')
-    dea = pd.read_pickle('GSE69822/GSE69822_{}_dea.pkl'.format(contrast))
-    dep = DEPlot()
+def get_gene_classes(dea, contrast, p=0.05):
 
-    der = dea.results['{}'.format(contrast)]    # type: DEResults
-    ts_der = dea.results['({})_ts'.format(contrast)]
-    ar_der = dea.results['({})_ar'.format(contrast)]
-    wt_ts_der = dea.results['{}_ts'.format(c_condition)]
-    exp_ts_der = dea.results['{}_ts'.format(e_condition)]
+    der = dea.results['{}'.format(contrast)]            # type: DEResults
+    ts_der = dea.results['({})_ts'.format(contrast)]    # type: DEResults
+    ar_der = dea.results['({})_ar'.format(contrast)]    # type: DEResults
 
-    p = 0.05
-    pairwise = set(der.top_table(p=p).index)
-
-    ddegs = set(filter_dde(der.score_clustering()).index).intersection(pairwise)
-    hm_data = der.top_table().loc[
-        der.score_clustering().loc[pairwise].sort_values('Cluster', ascending=False).index]
-    hm_data = hm_data.iloc[:, :len(dea.times)]
-    hm_data.columns = dea.times
+    deg = set(der.top_table(p=p).index)
+    dde = set(filter_dde(der.score_clustering()).index).intersection(deg)
 
     # Differentially responding genes
     ar_dt = set(ar_der.top_table(p=p).index)
 
     # Unclear why, but the AR and TS trajectory genes match
     assert ar_dt == set(ts_der.top_table(p=p).index)
-    drgs = ar_dt
+    drg = ar_dt
 
-    gene_sets = {'degs': pairwise, 'ddegs': ddegs, 'drgs': drgs}
-    set_sizes, set_collections = all_subsets([pairwise, ddegs, drgs],
-                                             ['degs', 'ddegs', 'drgs'])
+    # Maintain a sort order for pretty plots downstream
+    gene_classes = OrderedDict([('DEG', deg), ('DDE', dde), ('DRG', drg)])
 
-    #
-    obo = '../data/goa_data/go-basic.obo'
-    # association = "../data/goa_data/human_go_associations.txt"
-    #
-    # assoc = read_associations(association)
-    obo_dag = GODag(obo_file=obo)
-    # pop = set(ensembl_to_hgnc.hgnc_symbol)
-    # methods = ["bonferroni", "sidak", "holm"]
-    # g = GOEnrichmentStudy(pop, assoc, obo_dag, alpha=0.05, methods=methods)
+    return der, gene_classes
 
-    # all_genes_tf, all_tf_dict = ft.convert_gene_to_tf(pop, gene_dict)
-    # deg_tf, _ = ft.convert_gene_to_tf(ensembl_to_hgnc.loc[pairwise, 'hgnc_symbol'].values, gene_dict)
 
-    go_sets = {}
-    go_enrich = {}
-    # tf_sets = {}
-    for gene_class, gene_set in gene_sets.items():
-        # Write the gene list to a file
-        gene_set_path = 'GSE69822/go_enrich/pten_{}_list.txt'.format(gene_class)
-
-        hgnc_genes = ensembl_to_hgnc.loc[gene_set, 'hgnc_symbol'].values
-
-        # filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(hgnc_genes, gene_dict)
-        # # if gene_class == 'drgs':
-        # #     bg = deg_tf
-        # # else:
-        # #     bg = all_genes_tf
-        # tf_enrich = ft.calculate_study_enrichment(filtered_tf, all_genes_tf)
-        # tf_sets[gene_class] = set(tf_enrich[tf_enrich.p_bonferroni<0.05].TF)
-
-        write_gene_list(hgnc_genes, gene_set_path)
-        enrich_path = gene_set_path.replace('list', 'enrich')
-        try:
-            enrich = pd.read_csv(enrich_path, sep='\t')
-        except FileNotFoundError:
-            r = g.run_study(frozenset(hgnc_genes))
-            g.wr_tsv(enrich_path, r)
-            enrich = pd.read_csv(enrich_path, sep='\t')
-        enrich = enrich[(enrich.p_bonferroni < 0.05)]
-        go_sets[gene_class] = set(enrich['name'].values)
-        go_enrich[gene_class] = set(enrich['# GO'].values)
-
-    go_sizes, go_collections = all_subsets([go_sets['degs'], go_sets['ddegs'], go_sets['drgs']],
-                                           ['degs', 'ddegs', 'drgs'])
-    term_sizes, term_collections = all_subsets([go_enrich['degs'], go_enrich['ddegs'], go_enrich['drgs']],
-                                           ['degs', 'ddegs', 'drgs'])
-
-    x = pd.DataFrame()
-    for gc, terms in term_collections.items():
-        for t in terms:
-            x = x.append(pd.Series([gc, obo_dag.query_term(t).depth],
-                                   index=['gene class', 'term depth'], name=t))
-
-    g = x.groupby('gene class')
-    print(d_ks_test(g.get_group('degs')['term depth'].values, x['term depth'].values))
-    print(d_ks_test(g.get_group('drgs')['term depth'].values, x['term depth'].values))
-    print(d_ks_test(g.get_group('ddegs')['term depth'].values, x['term depth'].values))
-    print(d_ks_test(g.get_group('degs∩drgs')['term depth'].values, x['term depth'].values))
-    sys.exit()
-
-    # tf_sizes, tf_collections = all_subsets([tf_sets['degs'], tf_sets['ddegs'], tf_sets['drgs']],
-    #                                        ['degs', 'ddegs', 'drgs'])
-    # print(tf_sizes)
-
-    # Next find the genes which have at least one identifiable difference
-
-    # Different ar trajectories with identifiable points of change
-    # Usually 'significant' individual p-values drop out with a correction
-    ar_signs = ar_der.decide_tests(p=p).loc[drgs]
-    ar_signs = ar_signs[(ar_signs != 0).any(axis=1)]
-    ar_genes = set(ar_signs.index)
-
-    # Different ar trajectories with identifiable points of change
-    # Usually 'significant' individual p-values drop out with a correction
-    ts_signs = ts_der.decide_tests(p=p).loc[drgs]
-    ts_signs = ts_signs[(ts_signs != 0).any(axis=1)]
-    ts_genes = set(ts_signs.index)
-
+def sign_diff(dea, genes, exp, ctrl):
+    """
+    Find genes with a slope difference
+    :param dea:
+    :param genes:
+    :param exp:
+    :param ctrl:
+    :return:
+    """
+    wt_ts_der = dea.results['{}_ts'.format(ctrl)]       # type: DEResults
+    exp_ts_der = dea.results['{}_ts'.format(exp)]       # type: DEResults
 
     # It is challenging to find slopes that are significantly nonzero
     # A more liberal approach is to mesh the discrete steps of the independent
     # TS trajectories
     ts_fraction = 0.1
-    if len(ts_genes) < (1-ts_fraction)*len(drgs):
+    if len(ts_genes) < (1-ts_fraction)*len(genes):
         pten_signs = exp_ts_der.discrete
         wt_signs = wt_ts_der.discrete
         pten_signs.columns = dea.times[1:]
@@ -265,18 +181,95 @@ if __name__ == '__main__':
     else:
         diff_signs = ts_signs
 
-    ts_diff_signs = diff_signs.loc[drgs]
-    ts_path_df = np.cumsum(np.sign(ts_diff_signs[(ts_diff_signs != 0).any(axis=1)]), axis=1)
+    return diff_signs
 
 
-    # Get barplot_data
-    set_data = set_sizes.copy()
-    term_depths = {k: [obo_dag.query_term(term).depth for term in v] for k, v in term_collections.items()}
-    set_data['GO terms'] = go_sizes['size']
-    set_data = (set_data / set_data.sum()).stack().reset_index()
-    set_data.replace({'size': 'genes'}, inplace=True)
-    set_data.columns = ['Gene Category', 'Unique #', "Fraction of Total"]
+def get_heatmap_data(dea, der, genes, row_norm='max'):
+    clusters = der.score_clustering()
+    cluster_ordered_genes = clusters.loc[genes].sort_values('Cluster', ascending=False)
+    df = der.top_table().loc[cluster_ordered_genes.index]
+    df = df.iloc[:, :len(dea.times)]
+    df.columns = dea.times
 
+    if row_norm == 'max':
+        df = df.divide(df.abs().max(axis=1), axis=0)
+    elif row_norm == 'zscore':
+        df = stats.zscore(df, ddof=1, axis=1)
+
+    return df
+
+
+def get_hash_data(df, gene_set_dict):
+    hash_data = pd.DataFrame(index=df.index).astype(int)
+    for gene_class, gene_set in gene_set_dict.items():
+        hash_data[gene_class] = [ii in gene_set for ii in hash_data.index]
+
+    hash_data = hash_data.astype(int)
+    return hash_data
+
+
+def term_enrichment(pop_genes, gene_sets, obo_path, assoc_path, folder,
+                    condition, regenerate=False, test_sig=True, **kwargs):
+    kwargs.setdefault('alpha', 0.05)
+    kwargs.setdefault('methods', ["bonferroni", "sidak", "holm"])
+
+    # Setup goatools enrichment
+    if regenerate:
+        assoc = read_associations(assoc_path)
+        go_dag = GODag(obo_file=obo_path)
+        pop = set(pop_genes)
+        g = GOEnrichmentStudy(pop, assoc, go_dag, **kwargs)
+
+    # go_enrich = OrderedDict()
+    go_enrich = OrderedDict()
+
+    for gc, genes in gene_sets.items():
+        # Write the gene list to a file
+        out_path = '{}/go_enrich/{}_{}_list.txt'.format(folder, condition, gc)
+
+        write_gene_list(genes, out_path)
+        enrich_path = out_path.replace('list', 'enrich')
+        try:
+            enrich = pd.read_csv(enrich_path, sep='\t', index_col=0)
+        except FileNotFoundError:
+            r = g.run_study(frozenset(genes))
+            g.wr_tsv(enrich_path, r)
+            enrich = pd.read_csv(enrich_path, sep='\t', index_col=0)
+        enrich = enrich[(enrich.p_bonferroni < kwargs['alpha'])]
+        go_enrich[gc] = enrich
+
+    # Compile the results
+    # enrich_df = pd.concat(enrich_df, keys=gene_sets.keys())
+
+    # Get the sets
+    # go = enrich_df.groupby(level=0).apply(lambda x: set(x.index.get_level_values(1)))
+
+    go_sizes, go_terms = all_subsets(go_enrich)
+    all_terms = pd.concat(go_terms.values())
+    all_depths = all_terms['depth']
+    all_median = np.median(all_depths)
+
+    if test_sig:
+        for gene_class, terms in go_terms.items():
+            d = terms['depth'].values
+            if len(d) < 3:
+                print(gene_class, ' Skipped')
+                continue
+
+            t_med = np.median(d)
+            if t_med > all_median:
+                alternative = 'less'
+            elif t_med < all_median:
+                alternative = 'greater'
+            else:
+                alternative = 'two.sided'
+            ks_p = d_ks_test(d, all_depths, alternative=alternative)
+            print(gene_class, t_med, all_median, ks_p, sep='\t')
+
+    return pd.concat(go_terms.values(), keys=go_terms.keys())
+
+
+def plot_collections(hm_data, hash_data, term_data, output='show'):
     # Organize plot
     # Overall gridspec with 1 row, two columns
     f = plt.figure(figsize=(10, 10))
@@ -284,7 +277,7 @@ if __name__ == '__main__':
 
     # Create a gridspec within the gridspec. 1 row and 2 columns, specifying width ratio
     gs_left = gridspec.GridSpecFromSubplotSpec(2, 2, subplot_spec=gs[0],
-                                               width_ratios=[len(dea.times), 2],
+                                               width_ratios=[hm_data.shape[1], 2],
                                                height_ratios=[1, 50],
                                                wspace=0.05, hspace=0.05)
     gs_right = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[1],
@@ -297,12 +290,12 @@ if __name__ == '__main__':
     hash_ax = plt.subplot(gs_left[1, 1])
     gene_ax = plt.subplot(gs_right[0])
     go_ax = plt.subplot(gs_right[1])
-    # tf_ax = plt.subplot(gs_right[2])
 
-    hash_data = pd.DataFrame(index=hm_data.index).astype(int)
-    hash_data['ddeg'] = [ii in ddegs for ii in hash_data.index]
-    hash_data['drg'] = [ii in drgs for ii in hash_data.index]
-    hash_data = hash_data.astype(int)
+    # Hide the top right axes where the venn diagram goes
+    gene_ax.axis('off')
+
+    # Initialize plotter
+    dep = DEPlot()
 
     hm_ax, hash_ax = dep.heatmap(hm_data, hash_data, hm_ax=hm_ax, hash_ax=hash_ax,
                                  cbar_ax=cbar_ax, yticklabels=False,
@@ -314,63 +307,155 @@ if __name__ == '__main__':
     hidden_ax.set_ylabel('')
     hidden_ax.axis('off')
 
-    index_order = ['degs', 'ddegs', 'drgs', 'degs∩ddegs', 'degs∩drgs',
-                   'ddegs∩drgs','degs∩ddegs∩drgs', 'all']
-
-    y_order = list(reversed(range(len(set_sizes))))
-    # gene_ax = sns.barplot(data=set_data, y='Gene Category', x='Fraction of Total',
-    #                       hue='Unique #', log=True, ax=gene_ax, order=index_order)
-    gene_ax.axis('off')
-    gene_ax.set_ylabel('')
-    # gene_ax.set_title(gene_ax.get_xlabel())
-    # gene_ax.set_xlabel('')
+    index_order = ['DEG', 'DDE', 'DRG', 'DEG∩DDE', 'DEG∩DRG',
+                   'DDE∩DRG', 'DEG∩DDE∩DRG', 'All']
 
     c_index = [1, 7, 5, 9, 3, 6]
     colors = [Prism_10.mpl_colors[idx] for idx in c_index] + ['k', '0.5']
     cmap = {gc: colors[ii] for ii, gc in enumerate(index_order)}
 
+    x = term_data.reset_index(level=0)
+    x.columns = ['gene_class'] + x.columns[1:].values.tolist()
     full_dist = x.copy()
-    full_dist['gene class'] = "all"
+    full_dist['gene_class'] = "All"
     full_dist.reset_index(drop=True, inplace=True)
     all_x = pd.concat([x, full_dist])
+    g = all_x.groupby('gene_class')
 
-    go_ax = sns.boxplot(data=all_x, x='term depth', y='gene class',
+    go_ax = sns.boxplot(data=g.filter(lambda xx: True), x='depth', y='gene_class',
                         order=index_order, ax=go_ax,
                         showfliers=False, boxprops=dict(linewidth=0),
                         medianprops=dict(solid_capstyle='butt', color='w'),
                         palette=cmap)
-    xx = x[[gc in term_sizes[term_sizes['size'] < 30].index for gc in x['gene class']]]
-    go_ax = sns.swarmplot(data=xx, x='term depth', y='gene class', order=index_order, ax=go_ax, color='k')
-    go_ax.plot([x['term depth'].median(), x['term depth'].median()],
+
+
+    # xx = x[[gc in term_sizes[term_sizes['size'] < 30].index for gc in x['gene class']]]
+    small_groups = g.filter(lambda x: len(x) < 30)
+    go_ax = sns.swarmplot(data=small_groups, x='depth', y='gene_class',
+                          order=index_order, ax=go_ax, color='k')
+
+    go_ax.plot([x['depth'].median(), x['depth'].median()],
                go_ax.get_ylim(), 'k-', lw=2, zorder=0, c='0.25')
-    y_ticks = ["n={}".format(term_sizes.loc[gc, 'size'] if gc != 'all'
-                             else sum(term_sizes['size'])) for gc in index_order]
+
+    term_sizes = g.apply(len).reindex(index_order).fillna(0).astype(int)
+    y_ticks = ["n={}".format(term_sizes.loc[idx]) for idx in index_order]
     go_ax.set_yticklabels(y_ticks)
     go_ax.set_ylabel('')
-
-    # tf_ax.barh(y=y_order, width=tf_sizes['size'], tick_label=tf_sizes['index'], log=True, color=cmap)
-    # tf_ax.set_ylabel('')
-    # tf_ax.set_xlabel('')
     plt.tight_layout()
-    # plt.savefig('pten_gene_classification.pdf')
-    sys.exit()
 
-    # Set the type of plot to display
-    path_df = ar_signs
-    path_df.insert(0, 0, 0)
-    path_df.columns = dea.times
-    print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
-    fig = plt.figure(figsize=(10, 7.5))
-    ax = fig.add_axes([0.1, 0.1, 0.6, 0.85])
-    dep.plot_flows(ax, ['diff'], [Bold_8.mpl_colors[0]], [1], ['all'],
-                   x_coords=path_df.columns, min_sw=0.01, max_sw=1,
-                   uniform=False, path_df=path_df, node_width=10,
-                   legend=False)
-    plt.xlabel('Time (min)')
-    plt.ylabel('Cumulative Trajectory Differences')
-    plt.tight_layout()
-    plt.show()
-    sys.exit()
+    if output.lower() == 'show':
+        plt.show()
+
+    else:
+        plt.savefig(output, fmt='pdf')
+
+
+if __name__ == '__main__':
+    # Set globals
+    sns.set_palette(Bold_8.mpl_colors)
+    pd.set_option('display.width', 250)
+
+    plot_mean_variance = False
+
+    """
+    ===================================
+    ========== Load the data ==========
+    ===================================
+    """
+    # Prep the raw data
+    project_name = "GSE69822"
+    obo_file = '../data/goa_data/go-basic.obo'
+    associations =  '../data/goa_data/human_go_associations.txt'
+    t = [0, 15, 40, 90, 180, 300]
+    data_path = '../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt'
+    sim_data_path = '../data/motif_library/gnw_networks/all_sim_compiled_for_gse69822.pkl'
+
+    # Labels that can be used when making DE contrasts used by limma. This helps with setting defaults
+    contrast_labels = ['condition', 'time']
+
+    # Features of the samples taken that are used in calculating statistics
+    sample_features = ['condition', 'replicate', 'time']
+
+    # Load the data
+    raw = load_data(data_path, sample_features, bg_shift=False)
+
+    ensembl_to_hgnc = pd.read_csv('../data/GSE69822/mcf10a_gene_names.csv', index_col=0)
+    hgnc_to_ensembl = ensembl_to_hgnc.reset_index().set_index('hgnc_symbol')
+    gene_dict = pd.read_pickle('../data/tf_associations/human_encode_associations.pkl')
+
+    """
+        ===================================
+        ============= Training ============
+        ===================================
+    """
+    draw_sets = False
+    sankey_plots = True
+    e_condition = 'pten'  # The experimental condition used
+    c_condition = 'wt'  # The control condition used
+
+    # Remove unnecessary data
+    basic_data = raw.loc[:, [e_condition, c_condition]]
+    contrast = "{}-{}".format(e_condition, c_condition)
+    dea_path = '{}/{}_{}_dea.pkl'.format(project_name, project_name, contrast)
+
+    dea = fit_dea(dea_path, reference_labels=contrast_labels, index_names=sample_features)
+    der, gc = get_gene_classes(dea, contrast)
+
+    if draw_sets:
+        # Convert the ensembl symbols to hgnc for GO enrichment
+        hgnc_set = OrderedDict([(k, set(ensembl_to_hgnc.loc[v, 'hgnc_symbol'].values))
+                                for k, v in gc.items()])
+        enriched = term_enrichment(set(hgnc_to_ensembl.index), hgnc_set, obo_file,
+                                   associations, project_name, e_condition, test_sig=False)
+
+        # Get the data to plot
+        hm_data = get_heatmap_data(dea, der, gc['DEG'])
+        hash_keys = ['DDE', 'DRG']
+        hash_data = get_hash_data(hm_data, {k: gc[k] for k in hash_keys})
+
+        # Plot the data
+        plot_collections(hm_data, hash_data, enriched)
+
+    if sankey_plots:
+
+        # Next find the genes which have at least one identifiable difference
+
+        # Different ar trajectories with identifiable points of change
+        # Usually 'significant' individual p-values drop out with a correction
+        ar_signs = ar_der.decide_tests(p=p).loc[drgs]
+        ar_signs = ar_signs[(ar_signs != 0).any(axis=1)]
+        ar_genes = set(ar_signs.index)
+
+        # Different ar trajectories with identifiable points of change
+        # Usually 'significant' individual p-values drop out with a correction
+        ts_signs = ts_der.decide_tests(p=p).loc[drgs]
+        ts_signs = ts_signs[(ts_signs != 0).any(axis=1)]
+        ts_genes = set(ts_signs.index)
+
+        ts_diff_signs = diff_signs.loc[drgs]
+        ts_path_df = np.cumsum(np.sign(ts_diff_signs[(ts_diff_signs != 0).any(axis=1)]), axis=1)
+
+
+
+        # plt.savefig('pten_gene_classification.pdf')
+        sys.exit()
+
+        # Set the type of plot to display
+        path_df = ar_signs
+        path_df.insert(0, 0, 0)
+        path_df.columns = dea.times
+        print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
+        fig = plt.figure(figsize=(10, 7.5))
+        ax = fig.add_axes([0.1, 0.1, 0.6, 0.85])
+        dep.plot_flows(ax, ['diff'], [Bold_8.mpl_colors[0]], [1], ['all'],
+                       x_coords=path_df.columns, min_sw=0.01, max_sw=1,
+                       uniform=False, path_df=path_df, node_width=10,
+                       legend=False)
+        plt.xlabel('Time (min)')
+        plt.ylabel('Cumulative Trajectory Differences')
+        plt.tight_layout()
+        plt.show()
+        sys.exit()
 
 
 

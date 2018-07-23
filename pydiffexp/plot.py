@@ -291,20 +291,10 @@ class DEPlot(object):
         ax.set_title(gene)
         return ax
 
-    def heatmap(self, df, hash_df, row_norm='max', hm_ax=None, hash_ax=None, **kwargs):
+    def heatmap(self, df, hash_df, hm_ax=None, hash_ax=None, **kwargs):
         cmap = sns.diverging_palette(30, 260, s=80, l=55, as_cmap=True)
-        # df = df.loc[[g in set.union(*hash_labels) for g in df.index]]
-
-        if row_norm == 'max':
-            df = df.divide(df.abs().max(axis=1), axis=0)
-        elif row_norm == 'zscore':
-            df = stats.zscore(df, ddof=1, axis=1)
-
-        # fig = plt.figure(figsize=(4, 8))
 
         # The specifiers for the axes
-        # left, bottom, width, height = (0.1, 0.1, 0.7, 0.8)
-        # hm_ax = fig.add_axes([left, bottom, width, height])
         hm_ax = sns.heatmap(df, cmap=cmap, ax=hm_ax, cbar=True, **kwargs)
         hm_ax.set_xticklabels(hm_ax.get_xticklabels(), rotation=90)
 
