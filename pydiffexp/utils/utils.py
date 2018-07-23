@@ -65,7 +65,7 @@ def column_unique(x):
         df[data.name] = data.value_counts()
     return df
 
-
+@singledispatch
 def all_subsets(groups, labels=None):
     """
     Find all subsets of groups
@@ -74,10 +74,14 @@ def all_subsets(groups, labels=None):
     https://github.com/tctianchi/pyvenn/blob/master/venn.py
 
     :param groups: iterable of iterables
+    :param
     :return:
     """
     if labels is None:
         labels = list(string.ascii_uppercase[:len(groups)])
+
+    # Convert labels to list
+    labels = list(labels)
 
     n = len(groups)
 
@@ -100,6 +104,37 @@ def all_subsets(groups, labels=None):
             value = value - s
         dict_key = '∩'.join([labels[i] for i in range(n) if key[i] == '1'])
         set_collections[dict_key] = value
+
+    set_sizes = {k: len(v) for k, v in set_collections.items()}
+    set_sizes = pd.DataFrame(pd.Series(set_sizes), columns=['size'])
+
+    return set_sizes, set_collections
+
+
+@all_subsets.register(dict)
+def _(x):
+    labels = list(x.keys())
+
+    n = len(labels)
+
+    sets_data = [set(v.index) for v in x.values()]
+
+    s_all = set(chain(*sets_data))
+
+    set_collections = {}
+    for ii in range(1, 2 ** n):
+        key = bin(ii).split('0b')[-1].zfill(n)
+        value = s_all
+        sets_for_intersection = [sets_data[i] for i in range(n) if key[i] == '1']
+        sets_for_difference = [sets_data[i] for i in range(n) if key[i] == '0']
+        in_labels = [labels[i] for i in range(n) if key[i] == '1']
+        for s in sets_for_intersection:
+            value = value & s
+        for s in sets_for_difference:
+            value = value - s
+
+        dict_key = '∩'.join(in_labels)
+        set_collections[dict_key] = x[in_labels[0]].loc[value]
 
     set_sizes = {k: len(v) for k, v in set_collections.items()}
     set_sizes = pd.DataFrame(pd.Series(set_sizes), columns=['size'])
