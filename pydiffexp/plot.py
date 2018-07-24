@@ -367,7 +367,7 @@ class DEPlot(object):
                     pass
         return flow_dict, array_min, array_max, norm
 
-    def plot_nodes(self, ax, flow_dict, node_width, x_coords):
+    def plot_nodes(self, ax, flow_dict, node_width, x_coords, fc='k'):
         """ Plots nodes of flow dictionary
 
         Arguments:
@@ -395,7 +395,7 @@ class DEPlot(object):
                     offset = self.calc_offset(flow_dict, nodes, step + i, level, h)
                     nodes[(step + i, level)] = patches.Polygon(
                         self.make_node_points(x_coords[step + i], level + offset, h, node_width),
-                        fc='k', edgecolor='none')
+                        fc=fc, edgecolor='none')
                     ax.add_patch(nodes[(step + i, level)])
 
         return nodes
@@ -636,8 +636,9 @@ class DEPlot(object):
 
         return Path(verts, codes)
 
-    def plot_flows(self, ax, sets, colors, alphas, paths, max_sw=1, min_sw=0.01, node_width=None, x_coords=None,
-                   uniform=False, path_df=None, genes=None, norm=None, legend=True):
+    def plot_flows(self, ax, sets, colors, alphas, paths, max_sw=1, min_sw=0.01,
+                   node_width=None, node_color='k', x_coords=None, uniform=False,
+                   path_df=None, genes=None, norm=None, legend=True):
         """
         Plots a Sankey-like flow figure
 
@@ -683,14 +684,14 @@ class DEPlot(object):
 
         # Scale node width
         if node_width is None:
-            node_width = 0.01 * (ax.get_xlim()[1] - ax.get_xlim()[0])
+            node_width = 0.03 * (ax.get_xlim()[1] - ax.get_xlim()[0])
 
         if path_df is not None:
             flow_dict, path_min, path_max, norm = self.make_path_dict('NA', max_sw, min_sw, dc_df=path_df,
                                                                       norm=norm)  # create flow dictionary
             y_min, y_max = min(path_min - 0.1, y_min), max(path_max + 0.1, y_max)
             ax.set_ylim([y_min, y_max])
-            nodes = self.plot_nodes(ax, flow_dict, node_width, x_ticks)  # plot nodes
+            nodes = self.plot_nodes(ax, flow_dict, node_width, x_ticks, fc=node_color)  # plot nodes
             colors = colors[0]
             self.up_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='up')  # plot up polygons
             self.down_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='down')  # plot down polygons
