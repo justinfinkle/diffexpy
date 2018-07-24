@@ -417,6 +417,37 @@ if __name__ == '__main__':
         dea = fit_dea(dea_path, reference_labels=contrast_labels, index_names=sample_features)
         der, ar_der, ts_der, gc = get_gene_classes(dea, contrast)
 
+        all_genes_tf, all_tf_dict = ft.convert_gene_to_tf(set(hgnc_to_ensembl.index), gene_dict)
+
+        ts_diff = sign_diff(dea, ts_der, gc['DRG'], e, c_condition)
+        bg_genes = ensembl_to_hgnc.loc[gc['DRG'], 'hgnc_symbol'].values
+        bg, _ = ft.convert_gene_to_tf(bg_genes, gene_dict)
+
+        drg_tfs = ensembl_to_hgnc.loc[
+            set.intersection(*[gc['DRG'], hgnc_to_ensembl.loc[all_tf_dict.keys(), 'ensembl_gene_id'].values])]
+        drg_tfs = drg_tfs.reset_index().set_index('hgnc_symbol')
+
+        filtered_ensmbl = ts_diff[(ts_diff.iloc[:, 3] == 1) | (ts_diff.iloc[:, 4] == 1)].index
+        filtered_genes = ensembl_to_hgnc.loc[filtered_ensmbl, 'hgnc_symbol']
+        filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_dict)
+        print(len(filtered_genes), len(filtered_tf), len(bg))
+        enrich = ft.calculate_study_enrichment(filtered_tf, bg)
+        enrich = enrich[enrich.FDR_reject]
+        enrich.set_index('TF', inplace=True)
+        print(enrich[enrich.FDR_reject].sort_values('p_bonferroni'))
+        print(len(enrich))
+        print([(tf, tf in enrich.index) for tf in drg_tfs.index])
+
+        match = der.score_clustering().loc[gc['DDE'].intersection(hgnc_to_ensembl.loc[
+                                                                      [gene for gene in filtered_genes.values if
+                                                                       gene in all_tf_dict[
+                                                                           'FOXA1']], 'ensembl_gene_id'].values)].sort_values(
+            'Cluster')
+        match['avg'] = der.top_table().loc[match.index, 'AveExpr']
+        # Then match the cluster of the TF upstream...
+
+        sys.exit()
+
         if collection_plots:
             # Convert the ensembl symbols to hgnc for GO enrichment
             hgnc_set = OrderedDict([(k, set(ensembl_to_hgnc.loc[v, 'hgnc_symbol'].values))
@@ -435,15 +466,6 @@ if __name__ == '__main__':
 
         if sankey_plots:
             dep = DEPlot()
-            # all_genes_tf, all_tf_dict = ft.convert_gene_to_tf(set(hgnc_to_ensembl.index), gene_dict)
-            #
-            # filtered_ensmbl = ar_der.discrete[ar_der.discrete.iloc[:, 2] == 1].index
-            # filtered_genes = ensembl_to_hgnc.loc[filtered_ensmbl, 'hgnc_symbol']
-            # filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_dict)
-            # enrich = ft.calculate_study_enrichment(filtered_tf, all_genes_tf)
-            # print(enrich.FDR_reject.sum())
-            # print(enrich.head())
-            # sys.exit()
 
 
             # clusters = []
