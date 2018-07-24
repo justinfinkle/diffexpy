@@ -668,12 +668,18 @@ class DEPlot(object):
         ax.set_ylim([y_min, y_max])
 
         if x_coords is None or uniform == True:
-            x_coords = range(len(self.times))
-            ax.set_xlim([np.min(x_coords), np.max(x_coords)])
-            ax.set_xticks(x_coords)
-            ax.set_xticklabels(np.sort(self.times))
+            if x_coords is not None:
+                x_ticks = range(len(x_coords))
+                labels = x_coords
+            else:
+                x_ticks = range(len(self.times))
+                labels = np.sort(self.times)
+            ax.set_xlim([np.min(x_ticks), np.max(x_ticks)])
+            ax.set_xticks(x_ticks)
+            ax.set_xticklabels(labels)
         else:
-            ax.set_xticks(x_coords)
+            x_ticks = x_coords
+            ax.set_xticks(x_ticks)
 
         # Scale node width
         if node_width is None:
@@ -684,7 +690,7 @@ class DEPlot(object):
                                                                       norm=norm)  # create flow dictionary
             y_min, y_max = min(path_min - 0.1, y_min), max(path_max + 0.1, y_max)
             ax.set_ylim([y_min, y_max])
-            nodes = self.plot_nodes(ax, flow_dict, node_width, x_coords)  # plot nodes
+            nodes = self.plot_nodes(ax, flow_dict, node_width, x_ticks)  # plot nodes
             colors = colors[0]
             self.up_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='up')  # plot up polygons
             self.down_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='down')  # plot down polygons
@@ -720,7 +726,7 @@ class DEPlot(object):
                           labelspacing=max_in_ppi/legend_font,
                           handlelength=max_in_ppi*aspect_ratio/legend_font)
 
-            return
+            return ax
 
         for s, c, a, p in zip(sets, colors, alphas, paths):
             if p != 'all' and p != 'diff':
