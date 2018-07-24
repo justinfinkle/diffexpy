@@ -10,6 +10,7 @@ import matplotlib.gridspec as gridspec
 from pydiffexp import DEAnalysis, DEPlot, DEResults
 from pydiffexp.utils import all_subsets
 from pydiffexp.utils import multiindex_helpers as mi
+from pydiffexp.utils import fisher_test as ft
 from pipeline import filter_dde
 from palettable.cartocolors.qualitative import Bold_8, Prism_10
 from goatools.obo_parser import GODag
@@ -113,7 +114,7 @@ def load_sim_data(compiled_path):
     return sim_dea
 
 
-def fit_dea(path, override=False, **dea_kwargs):
+def fit_dea(path, data=None, override=False, **dea_kwargs):
     """
 
     :param path:
@@ -128,20 +129,22 @@ def fit_dea(path, override=False, **dea_kwargs):
             raise ValueError('Override to retrain')
         dea = pd.read_pickle(path)
     except (FileNotFoundError, ValueError) as e:
-        dea = DEAnalysis(basic_data, **dea_kwargs)
+        dea = DEAnalysis(data, **dea_kwargs)
         dea.fit_contrasts(dea.default_contrasts)
         dea.to_pickle(path)
     return dea
 
 
-def get_gene_classes(dea, contrast, p=0.05):
+def get_gene_classes(dea, contrast, p=0.05, strict_dde=True):
 
     der = dea.results['{}'.format(contrast)]            # type: DEResults
     ts_der = dea.results['({})_ts'.format(contrast)]    # type: DEResults
     ar_der = dea.results['({})_ar'.format(contrast)]    # type: DEResults
 
     deg = set(der.top_table(p=p).index)
-    dde = set(filter_dde(der.score_clustering()).index).intersection(deg)
+    dde = set(filter_dde(der.score_clustering()).index)
+    if strict_dde:
+        dde = dde.intersection(deg)
 
     # Differentially responding genes
     ar_dt = set(ar_der.top_table(p=p).index)
@@ -153,10 +156,10 @@ def get_gene_classes(dea, contrast, p=0.05):
     # Maintain a sort order for pretty plots downstream
     gene_classes = OrderedDict([('DEG', deg), ('DDE', dde), ('DRG', drg)])
 
-    return der, gene_classes
+    return der, ar_der, ts_der, gene_classes
 
 
-def sign_diff(dea, genes, exp, ctrl):
+def sign_diff(dea, ts_der, genes, exp, ctrl, p=0.05, reduce=True):
     """
     Find genes with a slope difference
     :param dea:
@@ -167,6 +170,12 @@ def sign_diff(dea, genes, exp, ctrl):
     """
     wt_ts_der = dea.results['{}_ts'.format(ctrl)]       # type: DEResults
     exp_ts_der = dea.results['{}_ts'.format(exp)]       # type: DEResults
+
+    # Different ar trajectories with identifiable points of change
+    # Usually 'significant' individual p-values drop out with a correction
+    ts_signs = ts_der.decide_tests(p=p).loc[genes]
+    ts_signs = ts_signs[(ts_signs != 0).any(axis=1)]
+    ts_genes = set(ts_signs.index)
 
     # It is challenging to find slopes that are significantly nonzero
     # A more liberal approach is to mesh the discrete steps of the independent
@@ -180,6 +189,9 @@ def sign_diff(dea, genes, exp, ctrl):
         diff_signs = np.sign(pten_signs - wt_signs)
     else:
         diff_signs = ts_signs
+
+    if reduce:
+        diff_signs = diff_signs.loc[genes].copy()
 
     return diff_signs
 
@@ -230,8 +242,10 @@ def term_enrichment(pop_genes, gene_sets, obo_path, assoc_path, folder,
         write_gene_list(genes, out_path)
         enrich_path = out_path.replace('list', 'enrich')
         try:
+            if regenerate:
+                raise ValueError('Override to retrain')
             enrich = pd.read_csv(enrich_path, sep='\t', index_col=0)
-        except FileNotFoundError:
+        except (FileNotFoundError, ValueError) as e:
             r = g.run_study(frozenset(genes))
             g.wr_tsv(enrich_path, r)
             enrich = pd.read_csv(enrich_path, sep='\t', index_col=0)
@@ -328,9 +342,7 @@ def plot_collections(hm_data, hash_data, term_data, output='show'):
                         medianprops=dict(solid_capstyle='butt', color='w'),
                         palette=cmap)
 
-
-    # xx = x[[gc in term_sizes[term_sizes['size'] < 30].index for gc in x['gene class']]]
-    small_groups = g.filter(lambda x: len(x) < 30)
+    small_groups = g.filter(lambda x: len(x) < 50)
     go_ax = sns.swarmplot(data=small_groups, x='depth', y='gene_class',
                           order=index_order, ax=go_ax, color='k')
 
@@ -388,74 +400,73 @@ if __name__ == '__main__':
         ============= Training ============
         ===================================
     """
-    draw_sets = False
-    sankey_plots = True
-    e_condition = 'pten'  # The experimental condition used
+    collection_plots = True
+    sankey_plots = False
+    e_condition = ['ko', 'ki', 'pten']  # The experimental condition used
     c_condition = 'wt'  # The control condition used
 
     # Remove unnecessary data
-    basic_data = raw.loc[:, [e_condition, c_condition]]
-    contrast = "{}-{}".format(e_condition, c_condition)
-    dea_path = '{}/{}_{}_dea.pkl'.format(project_name, project_name, contrast)
+    for e in e_condition:
+        basic_data = raw.loc[:, [e, c_condition]]
+        contrast = "{}-{}".format(e, c_condition)
+        dea_path = '{}/{}_{}_dea.pkl'.format(project_name, project_name, contrast)
 
-    dea = fit_dea(dea_path, reference_labels=contrast_labels, index_names=sample_features)
-    der, gc = get_gene_classes(dea, contrast)
+        dea = fit_dea(dea_path, reference_labels=contrast_labels, index_names=sample_features)
+        der, ar_der, ts_der, gc = get_gene_classes(dea, contrast)
+        print(e, len(gc['DDE']))
 
-    if draw_sets:
-        # Convert the ensembl symbols to hgnc for GO enrichment
-        hgnc_set = OrderedDict([(k, set(ensembl_to_hgnc.loc[v, 'hgnc_symbol'].values))
-                                for k, v in gc.items()])
-        enriched = term_enrichment(set(hgnc_to_ensembl.index), hgnc_set, obo_file,
-                                   associations, project_name, e_condition, test_sig=False)
+        if collection_plots:
+            # Convert the ensembl symbols to hgnc for GO enrichment
+            hgnc_set = OrderedDict([(k, set(ensembl_to_hgnc.loc[v, 'hgnc_symbol'].values))
+                                    for k, v in gc.items()])
+            enriched = term_enrichment(set(hgnc_to_ensembl.index), hgnc_set, obo_file,
+                                       associations, project_name, e,
+                                       test_sig=True, regenerate=False)
 
-        # Get the data to plot
-        hm_data = get_heatmap_data(dea, der, gc['DEG'])
-        hash_keys = ['DDE', 'DRG']
-        hash_data = get_hash_data(hm_data, {k: gc[k] for k in hash_keys})
+            # Get the data to plot
+            hm_data = get_heatmap_data(dea, der, gc['DEG'])
+            hash_keys = ['DDE', 'DRG']
+            hash_data = get_hash_data(hm_data, {k: gc[k] for k in hash_keys})
 
-        # Plot the data
-        plot_collections(hm_data, hash_data, enriched)
+            # Plot the data
+            plot_collections(hm_data, hash_data, enriched)
 
-    if sankey_plots:
+        if sankey_plots:
+            dep = DEPlot()
+            all_genes_tf, all_tf_dict = ft.convert_gene_to_tf(set(hgnc_to_ensembl.index), gene_dict)
 
-        # Next find the genes which have at least one identifiable difference
+            filtered_ensmbl = ar_der.discrete[ar_der.discrete.iloc[:, 2] == 1].index
+            filtered_genes = ensembl_to_hgnc.loc[filtered_ensmbl, 'hgnc_symbol']
+            filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_dict)
+            enrich = ft.calculate_study_enrichment(filtered_tf, all_genes_tf)
+            print(enrich.FDR_reject.sum())
+            print(enrich.head())
+            sys.exit()
 
-        # Different ar trajectories with identifiable points of change
-        # Usually 'significant' individual p-values drop out with a correction
-        ar_signs = ar_der.decide_tests(p=p).loc[drgs]
-        ar_signs = ar_signs[(ar_signs != 0).any(axis=1)]
-        ar_genes = set(ar_signs.index)
+            # ts_diff_signs = sign_diff(dea, ts_der, gc['DRG'], e_condition, c_condition)
+            # ts_path_df = np.cumsum(np.sign(ts_diff_signs[(ts_diff_signs != 0).any(axis=1)]), axis=1)
+            clusters = []
+            for kk in range(ar_der.discrete.shape[1]-1):
+                c = ['1' if jj > kk else '0' for jj in range(ar_der.discrete.shape[1])]
+                clusters.append('({})'.format(', '.join(c)))
+            print(clusters)
+            # Set the type of plot to display
+            path_df = ar_der.discrete[(ar_der.discrete != 0).any(axis=1)]
+            path_df.insert(0, 0, 0)
+            path_df.columns = dea.times
+            print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
+            fig = plt.figure(figsize=(10, 7.5))
+            ax = fig.add_axes([0.1, 0.1, 0.6, 0.85])
+            dep.plot_flows(ax, ['diff'], [Bold_8.mpl_colors[0]], [1], ['all'],
+                           x_coords=path_df.columns, min_sw=0.01, max_sw=1,
+                           uniform=False, path_df=path_df, node_width=10,
+                           legend=False)
+            plt.xlabel('Time (min)')
+            plt.ylabel('Cumulative Trajectory Differences')
+            plt.tight_layout()
+            plt.show()
 
-        # Different ar trajectories with identifiable points of change
-        # Usually 'significant' individual p-values drop out with a correction
-        ts_signs = ts_der.decide_tests(p=p).loc[drgs]
-        ts_signs = ts_signs[(ts_signs != 0).any(axis=1)]
-        ts_genes = set(ts_signs.index)
 
-        ts_diff_signs = diff_signs.loc[drgs]
-        ts_path_df = np.cumsum(np.sign(ts_diff_signs[(ts_diff_signs != 0).any(axis=1)]), axis=1)
-
-
-
-        # plt.savefig('pten_gene_classification.pdf')
-        sys.exit()
-
-        # Set the type of plot to display
-        path_df = ar_signs
-        path_df.insert(0, 0, 0)
-        path_df.columns = dea.times
-        print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
-        fig = plt.figure(figsize=(10, 7.5))
-        ax = fig.add_axes([0.1, 0.1, 0.6, 0.85])
-        dep.plot_flows(ax, ['diff'], [Bold_8.mpl_colors[0]], [1], ['all'],
-                       x_coords=path_df.columns, min_sw=0.01, max_sw=1,
-                       uniform=False, path_df=path_df, node_width=10,
-                       legend=False)
-        plt.xlabel('Time (min)')
-        plt.ylabel('Cumulative Trajectory Differences')
-        plt.tight_layout()
-        plt.show()
-        sys.exit()
 
 
 
