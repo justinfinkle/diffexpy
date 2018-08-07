@@ -8,11 +8,11 @@ from typing import Dict
 
 import numpy as np
 import pandas as pd
+import r2py_helpers as rh
 import rpy2.robjects as robjects
 import rpy2.robjects.numpy2ri
 from natsort import natsorted
 from pydiffexp.utils import multiindex_helpers as mi
-import r2py_helpers as rh
 from pydiffexp.utils.utils import int_or_float, grepl
 from rpy2.robjects.packages import importr
 
@@ -295,6 +295,41 @@ class DEResults(MArrayLM):
             df.columns = df_cols
 
         return df
+
+    def get_confint(self, times, confint=0.83):
+        """
+        Get the left and right confidence interval values for each timepoint
+        :param times:
+        :param confint:
+        :return:
+        """
+        # Initialize dataframe
+        ci_list = []
+
+        # For each timepoint get left and right CI values
+        for coef, t in enumerate(times):
+            # Top table including CI values
+            r = self.top_table(coef=(coef + 1), confint=confint, use_fstat=False)
+
+            # Get the CI values and ad
+            ci_values = r.iloc[:, 1:3]
+
+            # Add a multiindex
+            cur_ci = mi.make_multiindex(ci_values, split_str="\.")
+
+            # Add the timepoint as a level
+            cur_ci.columns = cur_ci.columns.set_levels([t], level=0)
+
+            # Add it to the existing data
+            ci_list.append(cur_ci)
+
+        # Make the dataframe
+        ci = pd.concat(ci_list, axis=1)
+
+        # Swap the levels for readability
+        ci = ci.reorder_levels([1, 0], axis=1)
+
+        return ci
 
     def decide_tests(self, m='global', **kwargs) -> pd.DataFrame:
         """

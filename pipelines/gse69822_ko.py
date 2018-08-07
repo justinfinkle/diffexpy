@@ -57,24 +57,6 @@ def running_stat(x, N, s='median'):
 
     return rs
 
-
-def get_confint(der, times, confint=0.83):
-    """
-
-    :param der:
-    :param times:
-    :param confint:
-    :return:
-    """
-    ci = pd.DataFrame([])
-    for coef, t in enumerate(times):
-        r = der.top_table(coef=(coef+1), confint=confint, use_fstat=False)
-        cur_ci = mi.make_multiindex(r.iloc[:, 1:3], split_str="\.")
-        cur_ci.columns = cur_ci.columns.set_levels([t], level=0)
-        ci = pd.concat([ci, cur_ci], axis=1)
-    ci = ci.reorder_levels([1,0], axis=1)
-    return ci
-
 def plot_gene_prediction(gene, match, data, sim_der, ci, ax=None):
     dep = DEPlot()
     matching_sim = match.loc[match.true_gene==gene, 'index'].astype(str).values
@@ -368,7 +350,7 @@ if __name__ == '__main__':
     plt.ylabel('')
     plt.show()
 
-    confint = get_confint(dde.dea.results['ki-wt'], dde.dea.times)
+    confint = dde.dea.results['ki-wt'].get_confint(dde.dea.times)
 
     # In[27]:
 
