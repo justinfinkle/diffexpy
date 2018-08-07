@@ -1,14 +1,27 @@
-import sys
+from collections import Counter
+from collections import OrderedDict
+
+import matplotlib as mpl
+import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import matplotlib.pyplot as plt
-from pydiffexp import DEAnalysis, DEPlot, DEResults, cluster_discrete
-from pipeline import DynamicDifferentialExpression as DDE
+from matplotlib.patches import FancyArrowPatch, ArrowStyle
+from matplotlib.transforms import Affine2D
+from palettable.cartocolors.diverging import TealRose_7
 from palettable.cartocolors.qualitative import Bold_8
+from palettable.cartocolors.qualitative import Prism_10
+from pydiffexp import DEAnalysis, DEPlot
+from pydiffexp.pipeline import DynamicDifferentialExpression as DDE
+from pydiffexp.plot import elbow_criteria
+from pydiffexp.utils import multiindex_helpers as mi
+from scipy import integrate
+from scipy import stats
+from sklearn.utils import shuffle
 
 
-def load_data(path, bg_shift=True, **kwargs):
+def load_data(path, mi_level_names, bg_shift=True, **kwargs):
     """
 
     :param path:
@@ -24,15 +37,148 @@ def load_data(path, bg_shift=True, **kwargs):
 
     if bg_shift:
         raw_data[raw_data <= 0] = 1
-    return raw_data
 
+    df = mi.make_multiindex(raw_data, index_names=mi_level_names)
+
+    return df
+
+def running_stat(x, N, s='median'):
+    if s=='median':
+        rs = np.array([np.median(x[ii:ii+N]) for ii in range(len(x)-N+1)])
+    elif s=='mean':
+        rs = np.cumsum(np.insert(x, 0, 0))
+        rs = (rs[N:] - rs[:-N]) / float(N)
+    return rs
+
+def get_confint(der, times, confint=0.83):
+    times = dde.dea.times
+    ci = pd.DataFrame([])
+    for coef, t in enumerate(times):
+        r = der.top_table(coef=(coef+1), confint=confint, use_fstat=False)
+        cur_ci = mi.make_multiindex(r.iloc[:, 1:3], split_str="\.")
+        cur_ci.columns = cur_ci.columns.set_levels([t], level=0)
+        ci = pd.concat([ci, cur_ci], axis=1)
+    ci = ci.reorder_levels([1,0], axis=1)
+    return ci
+
+def plot_gene_prediction(gene, match, data, sim_der, ci, ax=None):
+    dep = DEPlot()
+    matching_sim = match.loc[match.true_gene==gene, 'index'].astype(str).values
+    pred_lfc = sim_der.coefficients.loc[matching_sim]
+    baseline = data.loc[gene, 'wt'].groupby('time').mean().values
+    random = sim_der.coefficients+baseline
+    random.columns=sim_dea.times
+    random = random.unstack()
+    random.index = random.index.set_names(['time', 'replicate'])
+    random.name='random'
+    random = pd.concat([random], keys=['random'], names=['condition'])
+    pred = pred_lfc+baseline
+    pred.columns = sim_dea.times
+    pred = pred.unstack()
+    pred.index = pred.index.set_names(['time', 'replicate'])
+    pred.name = 'predicted'
+    pred = pd.concat([pred], keys=['predicted'], names=['condition'])
+    true = data.loc[gene, ['ki']]
+    pred = pred.reorder_levels(true.index.names)
+    random = random.reorder_levels(true.index.names)
+    ts_data = pd.concat([true, pred, random])
+    ts_data.name = gene
+    ax = dep.tsplot(ts_data, scatter=False, ax=ax, legend=False)
+    ax.set_ylabel('')
+#     ax.legend(loc='center left', bbox_to_anchor=([1, 0.5]))
+#     ax =sns.tsplot(pred.values, time=sim_dea.times, ax=ax, ci=83, marker='s')
+#     plt.plot(sim_dea.times, pred.T, 'k', alpha=0.2, zorder=0)
+#     plt.plot(sim_dea.times, pred.mean(), '-sk', zorder=0)
+
+def regular_points_on_circle(startangle=30, points=3, rad=1):
+    sa_rad = startangle*np.pi/180
+    rand_angles = np.linspace(0+sa_rad, np.pi*2+sa_rad, num=points+1)[:-1]
+    x = np.cos(rand_angles)*rad
+    y = np.sin(rand_angles)*rad
+    return np.vstack([x,y]).T
+
+def plot_net(ax, node_info, models):
+    pal = TealRose_7.mpl_colormap
+    pie_centers = {labels[n]:point for n, point in enumerate(regular_points_on_circle())}
+    pie_rad = 0.3
+    pie_colors = [Prism_10.mpl_colors[idx] for idx in [3,5,7]]+['0.5']
+
+    for node, center in pie_centers.items():
+        ax.annotate(xy=center, s=node, color='w', ha='center', va='center', fontsize=20)
+        ax.pie(node_info[node]['fracs'], startangle=90, radius=pie_rad, center=center, colors=pie_colors)
+#         ax.legend(['*', '+', '1'])
+
+    center_lines = {}
+    for combo in [('x', 'G'), ('G', 'y'), ('y', 'x')]:
+        center_lines[combo] = np.array([pie_centers[combo[0]], pie_centers[combo[1]]])
+
+    astyle = ArrowStyle('simple', head_length=7, head_width=7, tail_width=5)
+    for key, val in center_lines.items():
+        start, end = val[0], val[1]
+        o_length = np.sqrt(np.sum((start-end)**2))
+        center_xy = (end-start)/2+start
+
+        # Shorten
+        ss, se = Affine2D().scale((o_length-2*pie_rad)/o_length).transform([start, end])
+
+        # Translate by calculating where the center should have been
+        new_center_xy = (se-ss)/2+ss
+        center_delta = (new_center_xy-center_xy)
+        ss -= center_delta
+        se -= center_delta
+        new_center_xy = (se-ss)/2+ss
+
+        # Center line if needed
+    #     fa = FancyArrowPatch(posA=ss, posB=se, arrowstyle=astyle, lw=0, color='k')
+    #     ax.add_artist(fa)
+
+        # Translate outward, "left"
+        parent, child = key
+        edge = '{}->{}'.format(parent, child)
+        edge_count = models[edge].abs().sum()
+        edge_sign = models[edge].sum()/edge_count
+        edge_frac = edge_count/len(models)
+        ec = pal(edge_sign+1/2)
+
+        dx, dy = (se-ss)/2
+        fraction = 1/6
+        translate = np.array([-dy, dx])*fraction
+        left_center = center_xy-translate
+
+        center_delta = (new_center_xy-left_center)
+        out_s = ss-center_delta
+        out_e = se-center_delta
+
+        astyle = ArrowStyle('simple', head_length=7, head_width=10, tail_width=7*edge_frac)
+        fa = FancyArrowPatch(posA=out_s, posB=out_e, arrowstyle=astyle, lw=0, color=ec)
+        ax.add_artist(fa)
+
+        # Translate inward, "right"
+        parent, child = key[1], key[0]
+        edge = '{}->{}'.format(parent, child)
+        edge_count = models[edge].abs().sum()
+        edge_sign = models[edge].sum()/edge_count
+        edge_frac = edge_count/len(models)
+        ec = pal(edge_sign+1/2)
+
+        right_center = center_xy+translate
+
+        center_delta = (new_center_xy-right_center)
+        # Flip direction
+        in_s = se-center_delta
+        in_e = ss-center_delta
+
+        astyle = ArrowStyle('simple', head_length=7, head_width=10, tail_width=7*edge_frac)
+        fa = FancyArrowPatch(posA=in_s, posB=in_e, arrowstyle=astyle, lw=0, color=ec)
+        ax.add_artist(fa)
+
+    ax.axis('equal')
+    ax.set_title("n = {}".format(len(models)))
 
 if __name__ == '__main__':
     # Set globals
     sns.set_palette(Bold_8.mpl_colors)
     pd.set_option('display.width', 250)
-
-    plot_mean_variance = False
 
     """
     ===================================
@@ -49,19 +195,18 @@ if __name__ == '__main__':
     # Prep the raw data
     project_name = "GSE69822"
     t = [0, 15, 40, 90, 180, 300]
-    raw = load_data('../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt')
+    # Features of the samples taken that are used in calculating statistics
+    sample_features = ['condition', 'replicate', 'time']
+
+    raw = load_data('../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt', sample_features, bg_shift=False)
     ensembl_to_hgnc = pd.read_csv('../data/GSE69822/mcf10a_gene_names.csv', index_col=0)
     hgnc_to_ensembl = ensembl_to_hgnc.reset_index().set_index('hgnc_symbol')
 
     # Labels that can be used when making DE contrasts used by limma. This helps with setting defaults
     contrast_labels = ['condition', 'time']
 
-    # Features of the samples taken that are used in calculating statistics
-    sample_features = ['condition', 'replicate', 'time']
-    raw_dea = DEAnalysis(raw, reference_labels=contrast_labels, index_names=sample_features)
-
     # Remove unnecessary data
-    basic_data = raw_dea.raw.loc[:, ['ko', 'ki', 'wt']]
+    basic_data = raw.loc[:, ['ko', 'ki', 'wt']]
 
     sim_dea = DEAnalysis(sim_data, reference_labels=contrast_labels, index_names=sample_features)
 
@@ -77,7 +222,7 @@ if __name__ == '__main__':
     override = False  # Rerun certain parts of the analysis
 
     matches = dde.train(basic_data, project_name, sim_dea, experimental=e_condition,
-                        counts=True, override=override)
+                        counts=True, log2=False, override=override)
 
     g = matches.groupby('true_gene')
     # sys.exit()
@@ -90,7 +235,366 @@ if __name__ == '__main__':
     t_condition = 'ki'  # The test condition
     # predictions, error, sim_pred = dde.predict(t_condition, project_name)
 
-    dde.score(project_name, t_condition, c_condition, plot=True)
+    tr = dde.score(project_name, t_condition, c_condition, plot=False)
+
+    """
+        ====================================
+        ============= PLOTTING =============
+        ====================================
+    """
+
+    # Add the LFC data in as a predictor
+    der = dde.dea.results['{}-{}'.format(e_condition, c_condition)]
+    tr['mean_abs_lfc'] = der.coefficients.loc[tr.index].abs().sum(axis=1)
+    tr['percent'] = tr.grouped_diff / tr.random_grouped_e * 100
+    unsorted = tr.copy()
+    tr.sort_values('mean_abs_lfc', ascending=False, inplace=True)
 
 
+    tr.group_cluster == tr.ki_cluster
+    sns.regplot(np.log2(tr.abs_dev), tr.grouped_diff)
+    stats.spearmanr(tr.abs_dev, tr.grouped_diff)
 
+    censored = tr[tr.group_dev < (3 * tr.group_dev.std())]
+    kinon = tr[tr.ki_cluster != '(0, 0, 0, 0, 0, 0)']
+    n_top, top_val = elbow_criteria(range(len(censored)), censored.mean_abs_lfc)
+    plt.plot(range(len(censored)), censored.mean_abs_lfc)
+    plt.plot([n_top, n_top], [0, censored.mean_abs_lfc.max()], 'k')
+    plt.plot([0, len(censored)], [top_val, top_val], 'k')
+    plt.plot([0, len(censored)], [censored.mean_abs_lfc[0], censored.mean_abs_lfc[-1]], 'k')
+    top = censored.iloc[:n_top]
+
+    plt.figure(figsize=(5, 5))
+    plt.plot(np.arange(len(censored)) / len(censored), np.cumsum(censored.percent > 0) / len(censored), label='sorted')
+    plt.plot(np.arange(len(unsorted)) / len(unsorted), np.cumsum(unsorted.percent > 0) / len(unsorted),
+             label='original')
+    plt.plot([0, 1], [0, np.sum(tr.percent > 0) / len(tr)], label='random')
+    plt.legend(loc='center left', bbox_to_anchor=([1, 0.5]))
+
+    max_auroc = (sum(tr.percent > 0) / len(tr))
+    print(integrate.cumtrapz(x=np.arange(len(censored)) / len(censored),
+                             y=np.cumsum(censored.percent > 0) / len(censored))[-1] / max_auroc)
+    print(integrate.cumtrapz(x=np.arange(len(unsorted)) / len(unsorted),
+                             y=np.cumsum(unsorted.percent > 0) / len(unsorted))[-1] / max_auroc)
+    print((max_auroc / 2) / max_auroc)
+
+    n_shuff = 100
+    x = np.array([shuffle(unsorted.percent.values) for ii in range(n_shuff)])
+    growing_med = np.array([np.median(x[:, :ii + 1], axis=1) / np.median(x, axis=1) for ii in range(x.shape[1])]).T
+
+    plt.plot(range(len(unsorted)), growing_med.T, c='0.5', alpha=0.2)
+    plt.plot(range(len(unsorted)), np.mean(growing_med, axis=0), 'k', lw=2)
+    plt.plot(range(len(censored)), [np.median(censored.percent.values[:ii + 1]) / censored.percent.median()
+                                    for ii in range(len(censored))], lw=3)
+    plt.plot([-1, 220], [0, 0], 'k', zorder=0)
+    plt.ylim(-1, 2)
+    stats.wilcoxon(censored.percent)
+
+    N = 40
+    rm = np.array([running_stat(shuffle(unsorted.percent.values), N, s='median') for ii in range(n_shuff)])
+    plt.plot(rm.T, c='0.5', zorder=0, alpha=0.1)
+    plt.plot([0, 0], lw=2, c='0.5', label='random_sort', zorder=0)
+    plt.plot(np.median(rm, axis=0), label='<random_sort>')
+    srm = running_stat(tr.percent.values, N, s='median')
+    plt.plot([0, len(tr)], [tr.percent.median(), tr.percent.median()], label='med(all models)')
+    plt.plot([0, len(tr)], [top.percent.median(), top.percent.median()], label='med(top models)')
+    plt.plot(srm, label='LFC sorted')
+    plt.plot([0, len(tr)], [0, 0], 'k-', lw=1)
+    plt.ylim(-100, 100)
+    plt.plot(range(len(censored)), censored.mean_abs_lfc * 10, label='mean_abs_lfc')
+    leg = plt.legend(loc='center left', bbox_to_anchor=([1, 0.5]))
+    plt.xlim([0, len(srm) - 1])
+
+    plt.show()
+
+    sns.regplot(np.log2(tr.abs_dev), tr.grouped_diff, color='k', label='All Points')
+    sns.regplot(np.log2(kinon.abs_dev), kinon.grouped_diff, fit_reg=False, label='Active KI')
+    sns.regplot(np.log2(censored.abs_dev), censored.grouped_diff, fit_reg=False, label='Low model variance')
+    sns.regplot(np.log2(top.abs_dev), top.grouped_diff, fit_reg=False, label='Top')
+    plt.legend(loc='center left', bbox_to_anchor=([1, 0.5]))
+    stats.spearmanr(tr.abs_dev, tr.grouped_diff)
+
+    # In[22]:
+
+    group_keys = ['full', 'kinon', 'censored', 'top']
+    group_colors = ['k'] + Bold_8.mpl_colors[:3]
+    color_dict = OrderedDict(zip(group_keys, group_colors))
+
+    # In[23]:
+
+    print(tr.percent.median(), kinon.percent.median(), censored.percent.median(), top.percent.median())
+    print(tr.percent.mean(), kinon.percent.mean(), censored.percent.mean(), top.percent.mean())
+    print(stats.wilcoxon(tr.percent).pvalue / 2, stats.wilcoxon(kinon.percent).pvalue / 2,
+          stats.wilcoxon(censored.percent).pvalue / 2, stats.wilcoxon(top.percent).pvalue / 2)
+    box_data = [tr.percent, kinon.percent, censored.percent, top.percent]
+    df = pd.concat(box_data, keys=color_dict.keys()).reset_index()
+    sns.boxplot(data=df, y='level_0', x='percent', showfliers=False, width=0.5, notch=True,
+                medianprops=dict(solid_capstyle='butt', color='w'), palette=color_dict,
+                boxprops=dict(linewidth=0))
+    plt.plot([0, 0], [-0.5, len(box_data) - 0.5], 'k-', lw=3, zorder=0)
+    plt.xlabel('% improvement to random')
+    plt.ylabel('')
+    plt.show()
+
+    # In[24]:
+
+    print(tr.grouped_diff.median(), kinon.grouped_diff.median(), censored.grouped_diff.median(),
+          top.grouped_diff.median())
+    print(tr.grouped_diff.mean(), kinon.grouped_diff.mean(), censored.grouped_diff.mean(), top.grouped_diff.mean())
+    print(stats.wilcoxon(tr.grouped_diff).pvalue / 2, stats.wilcoxon(kinon.grouped_diff).pvalue / 2,
+          stats.wilcoxon(censored.grouped_diff).pvalue / 2, stats.wilcoxon(top.grouped_diff).pvalue / 2)
+    box_data = [tr.grouped_diff, kinon.grouped_diff, censored.grouped_diff, top.grouped_diff]
+
+    df = pd.concat(box_data, keys=color_dict.keys()).reset_index()
+    sns.boxplot(data=df, y='level_0', x='grouped_diff', showfliers=False, width=0.5, notch=True,
+                medianprops=dict(solid_capstyle='butt', color='w'), palette=color_dict,
+                boxprops=dict(linewidth=0))
+    plt.plot([0, 0], [-0.5, len(box_data) - 0.5], 'k-', lw=3, zorder=0)
+    plt.xlabel('∆MSE')
+    plt.ylabel('')
+    plt.show()
+
+    confint = get_confint(dde.dea.results['ki-wt'], dde.dea.times)
+
+    # In[27]:
+
+    sim_dea.results['ki-wt'].coefficients.shape
+    plot_gene_prediction('ENSG00000117289', matches, dde.dea.data, sim_dea.results['ki-wt'], confint)
+
+    stats.mannwhitneyu(tr.percent, kinon.percent).pvalue / 2
+
+    # In[30]:
+
+    gene = top.sort_values('grouped_e', ascending=True).index[0]
+    gene
+
+    # In[31]:
+
+    gene = top.sort_values('grouped_e', ascending=True).index[0]
+    print(top.loc[gene].T)
+    dep = DEPlot()
+    dep.tsplot(dde.dea.data.loc[gene])
+
+    plt.figure()
+    print(matches[matches.true_gene == gene].shape)
+    sns.tsplot(
+        sim_dea.results['ki-wt'].coefficients.loc[matches[matches.true_gene == gene]['index'].astype(str)].values,
+        time=sim_dea.times, ci=83, marker='s')
+    plt.plot(sim_dea.times, dde.dea.results['ki-wt'].coefficients.loc[gene], 's-', c='k')
+    plt.fill_between(sim_dea.times, confint.loc[gene, 'L'], confint.loc[gene, 'R'], color='0.5', alpha=0.2, lw=0)
+
+    # In[32]:
+
+    plt.plot(censored.mean_abs_lfc, censored.grouped_diff, '.')
+    plt.plot([0, 8], [0, 0], 'k')
+
+    # ### Figure organization
+
+    # In[33]:
+
+    group_keys = ['full', 'top']
+    group_colors = ['0.5'] + Bold_8.mpl_colors[:1]
+    color_dict = OrderedDict(zip(group_keys, group_colors))
+
+    # In[34]:
+
+    print("All % median: {}, % Top median: {}".format(tr.percent.median(), top.percent.median()))
+    print()
+    print("All % wilcoxp: {}, % Top wilcoxp: {}".format(stats.wilcoxon(tr.percent).pvalue / 2,
+                                                        stats.wilcoxon(top.percent).pvalue / 2))
+    print()
+    print("All ∆ median: {}, ∆ Top median: {}".format(tr.grouped_diff.median(), top.grouped_diff.median()))
+    print()
+    print("All ∆ wilcoxp: {}, ∆ Top wilcoxp: {}".format(stats.wilcoxon(tr.grouped_diff).pvalue / 2,
+                                                        stats.wilcoxon(top.grouped_diff).pvalue / 2))
+
+    # In[35]:
+
+    integrate.cumtrapz(np.cumsum(tr.percent > 0) / np.sum(tr.percent > 0),
+                       np.cumsum(tr.percent < 0) / np.sum(tr.percent < 0))[-1]
+
+    # In[36]:
+
+    integrate.cumtrapz(np.cumsum(censored.percent > 0) / np.sum(censored.percent > 0),
+                       np.cumsum(censored.percent < 0) / np.sum(censored.percent < 0))[-1]
+
+    # In[37]:
+
+    ss = tr.sort_values('abs_dev', ascending=False)
+    integrate.cumtrapz(np.cumsum(ss.percent > 0) / np.sum(ss.percent > 0),
+                       np.cumsum(ss.percent < 0) / np.sum(ss.percent < 0), )[-1]
+
+    # In[38]:
+
+    recall = np.cumsum(x > 0, axis=1) / np.sum(x > 0, axis=1)[0]
+    precision = np.cumsum(x > 0, axis=1) / (np.arange(x.shape[1]) + 1)
+    plt.plot(recall.T, precision.T, '0.5', alpha=0.5)
+    plt.plot(np.mean(recall, axis=0), np.mean(precision, axis=0), 'k')
+
+    recall = np.cumsum(tr.percent > 0) / np.sum(tr.percent > 0)
+    precision = np.cumsum(tr.percent > 0) / (np.arange(len(tr)) + 1)
+    print(integrate.cumtrapz(precision, recall)[-1])
+    plt.plot(recall, precision)
+
+    recall = np.cumsum(ss.percent > 0) / np.sum(ss.percent > 0)
+    precision = np.cumsum(ss.percent > 0) / (np.arange(len(ss)) + 1)
+    print(integrate.cumtrapz(precision, recall)[-1])
+    plt.plot(recall, precision)
+    plt.show()
+
+    # ### Network plots!
+
+    # In[39]:
+
+    net_data = pd.read_csv('../data/motif_library/gnw_networks/simulation_info.csv')
+    net_data.head()
+
+    plt.figure(figsize=(22, 10))
+    gs = gridspec.GridSpec(1, 2, width_ratios=[1, 3])
+    # Create a gridspec within the gridspec. 1 row and 2 columns, specifying width ratio
+    gs_left = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[0])
+
+    gs_right = gridspec.GridSpecFromSubplotSpec(2, 4, subplot_spec=gs[1],
+                                                hspace=0.5, width_ratios=[1, 1, 1, 0.1])
+    box_ax = plt.subplot(gs_left[0, 0])
+    auroc_ax = plt.subplot(gs_left[1, 0])
+
+    high_pred_ax = plt.subplot(gs_right[0, 0])
+    med_pred_ax = plt.subplot(gs_right[0, 1])
+    low_pred_ax = plt.subplot(gs_right[0, 2])
+    high_net_ax = plt.subplot(gs_right[1, 0])
+    med_net_ax = plt.subplot(gs_right[1, 1])
+    low_net_ax = plt.subplot(gs_right[1, 2])
+    hidden_ax = plt.subplot(gs_right[0, 3])
+    hidden_ax.axis('off')
+    cbar_ax = plt.subplot(gs_right[1, 3])
+
+    box_data = [tr.percent, top.percent]
+    df = pd.concat(box_data, keys=color_dict.keys()).reset_index()
+    df.columns = ['dataset', 'gene', 'value']
+    df['metric'] = 'percent'
+
+    box_ax = sns.boxplot(data=df, x='metric', y='value', hue='dataset', showfliers=False, width=0.5, notch=True,
+                         medianprops=dict(solid_capstyle='butt', color='w'), palette=color_dict,
+                         boxprops=dict(linewidth=0), ax=box_ax)
+    box_ax.plot([-0.5, len(box_data) - 0.5], [0, 0], 'k-', zorder=0)
+    box_ax.set_ylabel('% improvement over random')
+    box_ax.set_xlabel('')
+    box_ax.legend().remove()
+
+    violin_data = [tr.grouped_diff, top.grouped_diff]
+    violin_df = pd.concat(violin_data, keys=color_dict.keys()).reset_index()
+    violin_df.columns = ['dataset', 'gene', 'value']
+    violin_df['metric'] = 'difference'
+    violin_ax = box_ax.twinx()
+    c = Bold_8.mpl_colors[2]
+    violin_ax = sns.violinplot(data=violin_df, x='metric', y='value', hue='dataset', palette=color_dict,
+                               ax=violin_ax, order=[1, 'difference'], inner='stick')
+    violin_ax.plot([-0.5, len(violin_data) - 0.5], [0, 0], color=c, zorder=0)
+    violin_ax.set_ylabel('improvement over random', color=c, rotation=270, va='bottom')
+    violin_ax.tick_params('y', colors=c)
+    violin_ax.legend(loc='upper center', ncol=2, bbox_to_anchor=[0.5, 1.2])
+
+    # Set the line widths just for the outer lines on the violinplots
+    lw = 0
+    from matplotlib.collections import PolyCollection
+
+    for art in violin_ax.get_children():
+        if isinstance(art, PolyCollection):
+            art.set_linewidth(lw)
+
+    box_ax.set_xticklabels(['%', '∆'])
+
+    """
+    AUROC
+    """
+
+    auroc_ax.plot(np.cumsum(tr.percent < 0) / np.sum(tr.percent < 0),
+                  np.cumsum(tr.percent > 0) / np.sum(tr.percent > 0), label='sorted')
+    auroc_ax.plot(np.cumsum(ss.percent < 0) / np.sum(ss.percent < 0),
+                  np.cumsum(ss.percent > 0) / np.sum(ss.percent > 0), label='abs_dev')
+    auroc_ax.plot((np.cumsum(x < 0, axis=1) / np.sum(unsorted.percent < 0)).T,
+                  (np.cumsum(x > 0, axis=1) / np.sum(unsorted.percent > 0)).T, c='0.5', alpha=0.1)
+    auroc_ax.plot([0, 1], [0, 1], 'k', label='random')
+
+    auroc_ax.plot([0, 0], [0, 0], lw=2, c='0.5', label='shuffled', zorder=0)
+    auroc_ax.set_ylim(0, 1)
+    auroc_ax.set_xlim(0, 1)
+    auroc_ax.set_yticks([0, 0.5, 1])
+    auroc_ax.set_xticks([0, 0.5, 1])
+    auroc_ax.set_ylabel('TPRish')
+    auroc_ax.set_xlabel('FPRish')
+    leg = auroc_ax.legend(handlelength=1, loc='center left', bbox_to_anchor=(1, 0.5))
+
+    for line in leg.get_lines():
+        line.set_lw(4)
+        line.set_solid_capstyle('butt')
+
+    gene = top.index[29]
+    plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], confint,
+                         ax=high_pred_ax)
+    high_pred_ax.set_ylabel('Expression')
+
+    labels = ['G', 'x', 'y']
+    logics = ['_multiplicative', '_linear', '']
+    node_info = {}
+    models = net_data.loc[matches[matches.true_gene == gene]['index'].values]
+    for node in labels:
+        cur_dict = {}
+        counts = Counter(models['{}_logic'.format(node)])
+        cur_dict['fracs'] = [counts['{}{}'.format(node, log)] for log in logics]
+        no_in = sum(models['{}_in'.format(node)] == 0)
+        cur_dict['fracs'][-1] -= no_in
+        cur_dict['fracs'].append(no_in)
+        node_info[node] = cur_dict
+    plot_net(high_net_ax, node_info, models)
+
+    gene = tr.sort_values('percent', ascending=False).index[0]
+    plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], confint,
+                         ax=med_pred_ax)
+
+    labels = ['G', 'x', 'y']
+    logics = ['_multiplicative', '_linear', '']
+    node_info = {}
+    models = net_data.loc[matches[matches.true_gene == gene]['index'].values]
+    for node in labels:
+        cur_dict = {}
+        counts = Counter(models['{}_logic'.format(node)])
+        cur_dict['fracs'] = [counts['{}{}'.format(node, log)] for log in logics]
+        no_in = sum(models['{}_in'.format(node)] == 0)
+        cur_dict['fracs'][-1] -= no_in
+        cur_dict['fracs'].append(no_in)
+        node_info[node] = cur_dict
+    plot_net(med_net_ax, node_info, models)
+
+    gene = tr.sort_values('percent', ascending=False).index[30]
+    plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], confint,
+                         ax=low_pred_ax)
+    low_pred_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    labels = ['G', 'x', 'y']
+    logics = ['_multiplicative', '_linear', '']
+    node_info = {}
+    models = net_data.loc[matches[matches.true_gene == gene]['index'].values]
+    for node in labels:
+        cur_dict = {}
+        counts = Counter(models['{}_logic'.format(node)])
+        cur_dict['fracs'] = [counts['{}{}'.format(node, log)] for log in logics]
+        no_in = sum(models['{}_in'.format(node)] == 0)
+        cur_dict['fracs'][-1] -= no_in
+        cur_dict['fracs'].append(no_in)
+        node_info[node] = cur_dict
+    plot_net(low_net_ax, node_info, models)
+    leg = med_net_ax.legend(['×', '+', 'single input', 'no inputs'], ncol=4, loc='upper center',
+                            bbox_to_anchor=(0.5, 0), handletextpad=0.5, )
+    leg.set_title("Node regulation", prop={'size': 24})
+
+    # Add colorbar
+    cmap = TealRose_7.mpl_colormap
+    norm = mpl.colors.Normalize(vmin=-1, vmax=1)
+    cb1 = mpl.colorbar.ColorbarBase(cbar_ax, cmap=cmap,
+                                    norm=norm)
+    cb1.set_ticks([-1, 0, 1])
+    cbar_ax.set_ylabel('Average edge sign')
+
+    plt.tight_layout()
+    plt.show()
