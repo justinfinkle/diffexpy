@@ -10,14 +10,12 @@ import seaborn as sns
 from matplotlib.patches import FancyArrowPatch, ArrowStyle
 from matplotlib.transforms import Affine2D
 from palettable.cartocolors.diverging import TealRose_7
-from palettable.cartocolors.qualitative import Bold_8
-from palettable.cartocolors.qualitative import Prism_10
+from palettable.cartocolors.qualitative import Bold_8, Prism_10
 from pydiffexp import DEAnalysis, DEPlot
 from pydiffexp.pipeline import DynamicDifferentialExpression as DDE
 from pydiffexp.plot import elbow_criteria
 from pydiffexp.utils import multiindex_helpers as mi
-from scipy import integrate
-from scipy import stats
+from scipy import integrate, stats
 from sklearn.utils import shuffle
 
 
@@ -42,16 +40,32 @@ def load_data(path, mi_level_names, bg_shift=True, **kwargs):
 
     return df
 
+
 def running_stat(x, N, s='median'):
-    if s=='median':
+    """
+
+    :param x:
+    :param N:
+    :param s: running statistic to calculate
+    :return:
+    """
+    if s == 'median':
         rs = np.array([np.median(x[ii:ii+N]) for ii in range(len(x)-N+1)])
-    elif s=='mean':
+    elif s == 'mean':
         rs = np.cumsum(np.insert(x, 0, 0))
         rs = (rs[N:] - rs[:-N]) / float(N)
+
     return rs
 
+
 def get_confint(der, times, confint=0.83):
-    times = dde.dea.times
+    """
+
+    :param der:
+    :param times:
+    :param confint:
+    :return:
+    """
     ci = pd.DataFrame([])
     for coef, t in enumerate(times):
         r = der.top_table(coef=(coef+1), confint=confint, use_fstat=False)

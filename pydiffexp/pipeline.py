@@ -1,23 +1,21 @@
-import sys
 import ast
+import itertools as it
 import multiprocessing as mp
 import os
 import shutil
+import sys
 import tarfile
-import itertools as it
 
 import matplotlib.pyplot as plt
-import seaborn as sns
 import networkx as nx
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from pydiffexp import DEAnalysis, DEResults, DEPlot, get_scores, cluster_discrete, pairwise_corr
 from pydiffexp.gnw import mk_ch_dir, GnwNetResults, GnwSimResults, draw_results, get_graph
-from pydiffexp.gnw.sim_explorer import tsv_to_dg, to_gephi
+from pydiffexp.gnw.sim_explorer import tsv_to_dg
 from scipy import stats
-from scipy.spatial.distance import hamming
 from sklearn.metrics import mean_squared_error as mse
-from palettable.cartocolors import qualitative
 
 
 class DynamicDifferentialExpression(object):
@@ -122,6 +120,8 @@ class DynamicDifferentialExpression(object):
         pred_der = self.sim_dea.results[contrast]
         pred_lfc = pred_der.top_table().iloc[:, :len(self.times)]
         pred_lfc.index = pred_lfc.index.astype(int)
+        train_lfc = self.sim_dea.results['ko-wt'].coefficients.abs().mean(axis=1)
+        train_lfc.index = train_lfc.index.astype(int)
 
         # Reduce the number of genes to score against, for speed purposes
         if reduced_set:
@@ -142,7 +142,7 @@ class DynamicDifferentialExpression(object):
 
         # Calculate null model
         null_stats = self.estimators.apply(self.sample_stats, gene_to_model_error,
-                                           true_lfc, pred_lfc, true_der)
+                                           true_lfc, pred_lfc, true_der, train_lfc)
 
         # Combine the stats together
         test_stats = pd.concat([self.dde_genes, null_stats], axis=1).dropna()
@@ -358,7 +358,7 @@ class DynamicDifferentialExpression(object):
             p = avg_lfc
         return p
 
-    def sample_stats(self, df, dist_dict, true_lfc, pred_lfc, true_der,
+    def sample_stats(self, df, dist_dict, true_lfc, pred_lfc, true_der, trainlfc,
                      resamples=100, err=mse):
         # For readability
         gene = df.name
@@ -367,24 +367,26 @@ class DynamicDifferentialExpression(object):
 
         # Get the true log fold change for this dataframe
         test = true_lfc.loc[gene]
-        t = test*(1-true_der.p_value.loc[gene])
+        # t = test*(1-true_der.p_value.loc[gene])
 
         # Get the distribution of errors for all models to this gene
         e_dist = dist_dict.loc[gene]
         
         # Calculate prediction error
+        elfc = pd.concat([e_dist.loc[models], trainlfc.loc[models]], keys=['error', 'sumlfc'], axis=1)
 
         # Group the models log fold change predictions together for each time point
         # then calculate the error of the 'averaged' model
         grouped_prediction = pred_lfc.loc[models].median()
-        p = self.moderate_lfc(pred_lfc.loc[models])
-        grouped_error = err(t, p)
+        # p = self.moderate_lfc(pred_lfc.loc[models])
+        grouped_error = err(test, grouped_prediction)
 
-        group_dev = p.abs().sum()
+        group_dev = grouped_prediction.abs().sum()
 
         # Calculate a predicted cluster
 
-        n = self.moderate_lfc(pred_lfc)
+        # n = self.moderate_lfc(pred_lfc)
+        n = pred_lfc.median()
         nonzero = [stats.ttest_1samp(pred_lfc.loc[models, t], 0).pvalue < 0.05 for t in pred_lfc.columns]
         grouped_cluster = (np.sign(grouped_prediction)*nonzero).astype(int)
         grouped_cluster = str(tuple(grouped_cluster.values.tolist()))
@@ -405,7 +407,7 @@ class DynamicDifferentialExpression(object):
         # Calculate the average across all the random samples
         # The average of the medians should be close to the true median
         rs_median = e_dist.median()
-        rg_median = err(t, n)
+        rg_median = err(test, n)
         # rg_median = np.median(rg_lfc_error)
 
         # Error if all log fold change values are assumed to be zero
@@ -417,7 +419,7 @@ class DynamicDifferentialExpression(object):
                     'avg_e', 'random_avg_e', 'avg_diff', 'all_zeros', 'abs_dev', 'group_dev',
                     'group_cluster']
         s_values = [len(df), magnitude, grouped_error, rg_median, rg_median-grouped_error,
-                    avg_error, rs_median, rs_median-avg_error, all_zeros, t.abs().sum(),
+                    avg_error, rs_median, rs_median-avg_error, all_zeros, test.abs().sum(),
                     group_dev, grouped_cluster]
         s = pd.Series(s_values, index=s_labels)
         return s

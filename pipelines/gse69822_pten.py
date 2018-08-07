@@ -1,23 +1,22 @@
-import sys
 from collections import OrderedDict
 
+import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
-from scipy import stats
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-from pydiffexp import DEAnalysis, DEPlot, DEResults
-from pydiffexp.utils import all_subsets
-from pydiffexp.utils import multiindex_helpers as mi
-from pydiffexp.utils import fisher_test as ft
-from pipeline import filter_dde
-from palettable.cartocolors.qualitative import Bold_8, Prism_10
-from goatools.obo_parser import GODag
-from goatools import GOEnrichmentStudy
 import r2py_helpers as rh
 import rpy2.robjects as robj
+import seaborn as sns
+from goatools import GOEnrichmentStudy
+from goatools.obo_parser import GODag
+from palettable.cartocolors.qualitative import Bold_8, Prism_10
+from pipeline import filter_dde
+from pydiffexp import DEAnalysis, DEPlot, DEResults
+from pydiffexp.utils import all_subsets
+from pydiffexp.utils import fisher_test as ft
+from pydiffexp.utils import multiindex_helpers as mi
 from rpy2.robjects.packages import importr
+from scipy import stats
 
 # Import discrete goodness of fit
 dgof = importr('dgof')
@@ -400,7 +399,7 @@ if __name__ == '__main__':
         ============= Training ============
         ===================================
     """
-    collection_plots = False
+    collection_plots = True
     sankey_plots = False
     e_condition = ['pten']  # The experimental condition used
     c_condition = 'wt'  # The control condition used
@@ -445,8 +444,6 @@ if __name__ == '__main__':
             'Cluster')
         match['avg'] = der.top_table().loc[match.index, 'AveExpr']
         # Then match the cluster of the TF upstream...
-
-        sys.exit()
 
         if collection_plots:
             # Convert the ensembl symbols to hgnc for GO enrichment
