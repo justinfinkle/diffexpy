@@ -9,9 +9,9 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.patches import FancyArrowPatch, ArrowStyle
 from matplotlib.transforms import Affine2D
-from palettable.cartocolors.diverging import TealRose_7
+from palettable.cartocolors.diverging import Earth_7
 from palettable.cartocolors.qualitative import Bold_8, Prism_10
-from pydiffexp import DEAnalysis, DEPlot
+from pydiffexp import DEPlot
 from pydiffexp.pipeline import DynamicDifferentialExpression as DDE
 from pydiffexp.plot import elbow_criteria
 from pydiffexp.utils import multiindex_helpers as mi
@@ -57,6 +57,7 @@ def running_stat(x, N, s='median'):
 
     return rs
 
+
 def plot_gene_prediction(gene, match, data, sim_der, ci, ax=None):
     dep = DEPlot()
     matching_sim = match.loc[match.true_gene==gene, 'index'].astype(str).values
@@ -80,11 +81,9 @@ def plot_gene_prediction(gene, match, data, sim_der, ci, ax=None):
     ts_data = pd.concat([true, pred, random])
     ts_data.name = gene
     ax = dep.tsplot(ts_data, scatter=False, ax=ax, legend=False)
+    ax.set_title(ensembl_to_hgnc.loc[gene, 'hgnc_symbol'])
     ax.set_ylabel('')
-#     ax.legend(loc='center left', bbox_to_anchor=([1, 0.5]))
-#     ax =sns.tsplot(pred.values, time=sim_dea.times, ax=ax, ci=83, marker='s')
-#     plt.plot(sim_dea.times, pred.T, 'k', alpha=0.2, zorder=0)
-#     plt.plot(sim_dea.times, pred.mean(), '-sk', zorder=0)
+
 
 def regular_points_on_circle(startangle=30, points=3, rad=1):
     sa_rad = startangle*np.pi/180
@@ -93,8 +92,9 @@ def regular_points_on_circle(startangle=30, points=3, rad=1):
     y = np.sin(rand_angles)*rad
     return np.vstack([x,y]).T
 
+
 def plot_net(ax, node_info, models):
-    pal = TealRose_7.mpl_colormap
+    pal = Earth_7.mpl_colormap
     pie_centers = {labels[n]:point for n, point in enumerate(regular_points_on_circle())}
     pie_rad = 0.3
     pie_colors = [Prism_10.mpl_colors[idx] for idx in [3,5,7]]+['0.5']
@@ -171,6 +171,7 @@ def plot_net(ax, node_info, models):
     ax.axis('equal')
     ax.set_title("n = {}".format(len(models)))
 
+
 if __name__ == '__main__':
     # Set globals
     sns.set_palette(Bold_8.mpl_colors)
@@ -204,7 +205,10 @@ if __name__ == '__main__':
     # Remove unnecessary data
     basic_data = raw.loc[:, ['ko', 'ki', 'wt']]
 
-    sim_dea = DEAnalysis(sim_data, reference_labels=contrast_labels, index_names=sample_features)
+    # sim_dea = DEAnalysis(sim_data, reference_labels=contrast_labels, index_names=sample_features)
+    sim_path = "{}/{}_sim.pkl".format(project_name, project_name)
+    # sim_dea.to_pickle(sim_path)
+    sim_dea = pd.read_pickle(sim_path)
 
     """
         ===================================
@@ -221,7 +225,6 @@ if __name__ == '__main__':
                         counts=True, log2=False, override=override)
 
     g = matches.groupby('true_gene')
-    # sys.exit()
 
     """
         ====================================
@@ -229,7 +232,6 @@ if __name__ == '__main__':
         ====================================
     """
     t_condition = 'ki'  # The test condition
-    # predictions, error, sim_pred = dde.predict(t_condition, project_name)
 
     tr = dde.score(project_name, t_condition, c_condition, plot=False)
 
@@ -246,10 +248,10 @@ if __name__ == '__main__':
     unsorted = tr.copy()
     tr.sort_values('mean_abs_lfc', ascending=False, inplace=True)
 
-
-    tr.group_cluster == tr.ki_cluster
+    print(stats.spearmanr(tr.abs_dev, tr.grouped_diff))
     sns.regplot(np.log2(tr.abs_dev), tr.grouped_diff)
-    stats.spearmanr(tr.abs_dev, tr.grouped_diff)
+    plt.tight_layout()
+    plt.close()
 
     censored = tr[tr.group_dev < (3 * tr.group_dev.std())]
     kinon = tr[tr.ki_cluster != '(0, 0, 0, 0, 0, 0)']
@@ -300,8 +302,9 @@ if __name__ == '__main__':
     plt.plot(range(len(censored)), censored.mean_abs_lfc * 10, label='mean_abs_lfc')
     leg = plt.legend(loc='center left', bbox_to_anchor=([1, 0.5]))
     plt.xlim([0, len(srm) - 1])
+    plt.tight_layout()
 
-    plt.show()
+    plt.close()
 
     sns.regplot(np.log2(tr.abs_dev), tr.grouped_diff, color='k', label='All Points')
     sns.regplot(np.log2(kinon.abs_dev), kinon.grouped_diff, fit_reg=False, label='Active KI')
@@ -309,8 +312,7 @@ if __name__ == '__main__':
     sns.regplot(np.log2(top.abs_dev), top.grouped_diff, fit_reg=False, label='Top')
     plt.legend(loc='center left', bbox_to_anchor=([1, 0.5]))
     stats.spearmanr(tr.abs_dev, tr.grouped_diff)
-
-    # In[22]:
+    plt.close()
 
     group_keys = ['full', 'kinon', 'censored', 'top']
     group_colors = ['k'] + Bold_8.mpl_colors[:3]
@@ -330,7 +332,7 @@ if __name__ == '__main__':
     plt.plot([0, 0], [-0.5, len(box_data) - 0.5], 'k-', lw=3, zorder=0)
     plt.xlabel('% improvement to random')
     plt.ylabel('')
-    plt.show()
+    plt.close()
 
     # In[24]:
 
@@ -348,7 +350,7 @@ if __name__ == '__main__':
     plt.plot([0, 0], [-0.5, len(box_data) - 0.5], 'k-', lw=3, zorder=0)
     plt.xlabel('∆MSE')
     plt.ylabel('')
-    plt.show()
+    plt.close()
 
     confint = dde.dea.results['ki-wt'].get_confint(dde.dea.times)
 
@@ -370,6 +372,7 @@ if __name__ == '__main__':
     print(top.loc[gene].T)
     dep = DEPlot()
     dep.tsplot(dde.dea.data.loc[gene])
+    plt.close()
 
     plt.figure()
     print(matches[matches.true_gene == gene].shape)
@@ -383,6 +386,7 @@ if __name__ == '__main__':
 
     plt.plot(censored.mean_abs_lfc, censored.grouped_diff, '.')
     plt.plot([0, 8], [0, 0], 'k')
+    plt.close()
 
     # ### Figure organization
 
@@ -436,7 +440,7 @@ if __name__ == '__main__':
     precision = np.cumsum(ss.percent > 0) / (np.arange(len(ss)) + 1)
     print(integrate.cumtrapz(precision, recall)[-1])
     plt.plot(recall, precision)
-    plt.show()
+    plt.close()
 
     # ### Network plots!
 
@@ -446,14 +450,14 @@ if __name__ == '__main__':
     net_data.head()
 
     plt.figure(figsize=(22, 10))
-    gs = gridspec.GridSpec(1, 2, width_ratios=[1, 3])
+    gs = gridspec.GridSpec(1, 2, width_ratios=[1, 3], wspace=0.4)
     # Create a gridspec within the gridspec. 1 row and 2 columns, specifying width ratio
-    gs_left = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[0])
+    gs_left = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[0], hspace=0.5)
 
     gs_right = gridspec.GridSpecFromSubplotSpec(2, 4, subplot_spec=gs[1],
                                                 hspace=0.5, width_ratios=[1, 1, 1, 0.1])
-    box_ax = plt.subplot(gs_left[0, 0])
-    auroc_ax = plt.subplot(gs_left[1, 0])
+    auroc_ax = plt.subplot(gs_left[0, 0])
+    box_ax = plt.subplot(gs_left[1, 0])
 
     high_pred_ax = plt.subplot(gs_right[0, 0])
     med_pred_ax = plt.subplot(gs_right[0, 1])
@@ -520,7 +524,7 @@ if __name__ == '__main__':
     auroc_ax.set_xticks([0, 0.5, 1])
     auroc_ax.set_ylabel('TPRish')
     auroc_ax.set_xlabel('FPRish')
-    leg = auroc_ax.legend(handlelength=1, loc='center left', bbox_to_anchor=(1, 0.5))
+    leg = auroc_ax.legend(handlelength=1, loc='center left', bbox_to_anchor=(0.95, 0.5), handletextpad=0.2)
 
     for line in leg.get_lines():
         line.set_lw(4)
@@ -581,11 +585,11 @@ if __name__ == '__main__':
         node_info[node] = cur_dict
     plot_net(low_net_ax, node_info, models)
     leg = med_net_ax.legend(['×', '+', 'single input', 'no inputs'], ncol=4, loc='upper center',
-                            bbox_to_anchor=(0.5, 0), handletextpad=0.5, )
+                            bbox_to_anchor=(0.5, 0.1), handletextpad=0.5, )
     leg.set_title("Node regulation", prop={'size': 24})
 
     # Add colorbar
-    cmap = TealRose_7.mpl_colormap
+    cmap = Earth_7.mpl_colormap
     norm = mpl.colors.Normalize(vmin=-1, vmax=1)
     cb1 = mpl.colorbar.ColorbarBase(cbar_ax, cmap=cmap,
                                     norm=norm)
@@ -593,4 +597,5 @@ if __name__ == '__main__':
     cbar_ax.set_ylabel('Average edge sign')
 
     plt.tight_layout()
-    plt.show()
+    plt.subplots_adjust(left=0.07, right=0.83, top=0.95)
+    plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_4/4_model_predictions.pdf", fmt='pdf')
