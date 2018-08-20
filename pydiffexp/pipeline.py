@@ -360,10 +360,19 @@ class DynamicDifferentialExpression(object):
 
     def sample_stats(self, df, dist_dict, true_lfc, pred_lfc, true_der, trainlfc,
                      resamples=100, err=mse):
-        # For readability
+        # Test filter
         gene = df.name
+
+        # preddev = pred_lfc.abs().mean(axis=1)
+        # df['preddev'] = [preddev.loc[ii] for ii in df['index']]
+        # df = df[df.preddev < 1].copy()
+
+        # For readability
+
         models = df['index'].values.astype(int)
         n = len(df)
+        # if n < 1:
+        #     return
 
         # Get the true log fold change for this dataframe
         test = true_lfc.loc[gene]

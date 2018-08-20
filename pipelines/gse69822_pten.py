@@ -376,7 +376,7 @@ if __name__ == '__main__':
     # Prep the raw data
     project_name = "GSE69822"
     obo_file = '../data/goa_data/go-basic.obo'
-    associations =  '../data/goa_data/human_go_associations.txt'
+    associations = '../data/goa_data/human_go_associations.txt'
     t = [0, 15, 40, 90, 180, 300]
     data_path = '../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt'
     sim_data_path = '../data/motif_library/gnw_networks/all_sim_compiled_for_gse69822.pkl'
@@ -400,7 +400,7 @@ if __name__ == '__main__':
         ===================================
     """
     collection_plots = True
-    sankey_plots = False
+    sankey_plots = True
     e_condition = ['pten']  # The experimental condition used
     c_condition = 'wt'  # The control condition used
 
@@ -478,6 +478,7 @@ if __name__ == '__main__':
             path_df = ar_der.discrete.loc[genes]
             # path_df = path_df[(path_df!=0).any(axis=1)]
             path_df.insert(0, 0, 0)
+            path_df = path_df[(path_df!=0).any(axis=1)]
             path_df.columns = dea.times
             print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
             # fig = plt.figure(figsize=(10, 7.5))
@@ -500,6 +501,7 @@ if __name__ == '__main__':
             ts_path_df = np.cumsum(np.sign(ts_diff_signs), axis=1)
             path_df = ts_path_df
             path_df.insert(0, 0, 0)
+            path_df = path_df[(path_df != 0).any(axis=1)]
             path_df.columns = dea.times
             print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
             # fig = plt.figure(figsize=(10, 7.5))
@@ -513,6 +515,7 @@ if __name__ == '__main__':
             cur_ax.set_xticklabels(path_df.columns, rotation=90)
             cur_ax.set_ylim([-4, 4])
             # plt.xlabel('Time (min)')
+            cur_ax.set_title("n={}".format(len(path_df)))
             if idx == 0:
                 cur_ax.set_ylabel('Cumulative Trajectory\nDifferences')
                 cur_ax.set_yticks(range(-4, 5))
