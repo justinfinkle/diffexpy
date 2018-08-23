@@ -14,19 +14,27 @@ def get_rxn_info(key, rxn):
     info.name = key
     return info
 
-tsv_path = "/Users/jfinkle/Desktop/InSilicoSize10-Ecoli1.tsv"
-jar_loc = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/gnw/gnw-3.1.2b.jar'
-sbml_path = '/Users/jfinkle/Desktop/InSilicoSize10-Ecoli1.xml'
+nets = [0, 1]
+conditions = ['wt', 'ki', 'ko']
+for n in nets:
+    for c in conditions:
+        print(n, c)
+        tsv_path = "/Volumes/Hephaestus/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/example_nets/" \
+                   "{}/{}_sim/{}_{}_goldstandard_signed.tsv".format(n, c, n, c)
+        jar_loc = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/gnw/gnw-3.1.2b.jar'
+        sbml_path = '/Volumes/Hephaestus/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/example_nets/' \
+                    '{}/{}_sim/{}_{}.xml'.format(n, c, n, c)
 
-df, dg = tsv_to_dg(tsv_path)
+        df, dg = tsv_to_dg(tsv_path)
 
-net = GnwNetwork(dg, jar_path=jar_loc, out_path='.', settings="", perturbations="")
-net.load_sbml(sbml_path=sbml_path, add_rxn=False)
-reactions = net.tree.get_rxn()
-k = list(reactions.keys())[0]
-get_rxn_info(k, reactions[k])
+        net = GnwNetwork(dg, jar_path=jar_loc, out_path='.', settings="", perturbations="")
+        net.load_sbml(sbml_path=sbml_path, add_rxn=False)
+        reactions = net.tree.get_rxn()
+        k = list(reactions.keys())[0]
+        get_rxn_info(k, reactions[k])
 
-all_rxn = [get_rxn_info(k, r) for k, r in reactions.items()]
+        all_rxn = [get_rxn_info(k, r) for k, r in reactions.items()]
 
-params = pd.concat(all_rxn, axis=1).T
-params.to_csv('/Users/jfinkle/Desktop/InSilicoSize10-Ecoli1_params.csv')
+        params = pd.concat(all_rxn, axis=1).T
+        params.to_pickle('/Volumes/Hephaestus/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/example_nets/'
+                         '{}/{}_sim/{}_{}_sbml_params.pkl'.format(n, c, n, c))
