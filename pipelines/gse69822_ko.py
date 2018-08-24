@@ -1,5 +1,6 @@
 from collections import Counter
 from collections import OrderedDict
+from typing import Union
 
 import matplotlib as mpl
 import matplotlib.gridspec as gridspec
@@ -11,7 +12,7 @@ from matplotlib.patches import FancyArrowPatch, ArrowStyle
 from matplotlib.transforms import Affine2D
 from palettable.cartocolors.diverging import Earth_7
 from palettable.cartocolors.qualitative import Bold_8, Prism_10
-from pydiffexp import DEPlot
+from pydiffexp import DEPlot, DEAnalysis
 from pydiffexp.pipeline import DynamicDifferentialExpression as DDE
 from pydiffexp.plot import elbow_criteria
 from pydiffexp.utils import multiindex_helpers as mi
@@ -108,7 +109,6 @@ def plot_net(ax, node_info, models, labels):
     for combo in [('x', 'G'), ('G', 'y'), ('y', 'x')]:
         center_lines[combo] = np.array([pie_centers[combo[0]], pie_centers[combo[1]]])
 
-    astyle = ArrowStyle('simple', head_length=7, head_width=7, tail_width=5)
     for key, val in center_lines.items():
         start, end = val[0], val[1]
         o_length = np.sqrt(np.sum((start-end)**2))
@@ -123,10 +123,6 @@ def plot_net(ax, node_info, models, labels):
         ss -= center_delta
         se -= center_delta
         new_center_xy = (se-ss)/2+ss
-
-        # Center line if needed
-    #     fa = FancyArrowPatch(posA=ss, posB=se, arrowstyle=astyle, lw=0, color='k')
-    #     ax.add_artist(fa)
 
         # Translate outward, "left"
         parent, child = key
@@ -171,66 +167,108 @@ def plot_net(ax, node_info, models, labels):
     ax.axis('equal')
     ax.set_title("n = {}".format(len(models)))
 
+
+def load_sim_data(path, node='y', perturb: Union[int, tuple, None]=1):
+    """
+    Load simulation data
+    :param path:
+    :param node:
+    :param perturb:
+    :return:
+    """
+    # Initizialize a slicer
+    idx = pd.IndexSlice
+
+    # Read data
+    sim_data = pd.read_pickle(path)
+
+    if perturb is not None:
+        sim_data = sim_data.loc[node, idx[:, :, perturb, :]]
+    sim_data.columns = sim_data.columns.remove_unused_levels()
+    sim_data.columns.set_names(['replicate', 'time'], level=[1, 3], inplace=True)
+    return sim_data
+
+
+def load_sim_dea(path, sim_data, ref_labels, idx_names, override=False):
+    try:
+        # If the user wants to override, raise a ValueError to force exception
+        if override:
+            raise ValueError('Override to retrain')
+
+        sim_dea = pd.read_pickle(path)
+
+    except (FileNotFoundError, ValueError):
+        sim_dea = DEAnalysis(sim_data, reference_labels=ref_labels, index_names=idx_names)
+        sim_dea.to_pickle(path)
+
+    return sim_dea
+
+
 def main():
+    """
+     ===================================
+     ====== Set script parameters ======
+     ===================================
+     """
+    # todo: argv and parsing
+
     # Set globals
     sns.set_palette(Bold_8.mpl_colors)
     pd.set_option('display.width', 250)
+
+    # External files
+    rna_seq = '../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt'
+    compiled_sim = '../data/motif_library/gnw_networks/all_sim_compiled_for_gse69822.pkl'
+    gene_names = '../data/GSE69822/mcf10a_gene_names.csv'
+
+    e_condition = 'ko'  # The experimental condition used
+    c_condition = 'wt'  # The control condition used
+    t_condition = 'ki'  # The test condition
+
+    override = False  # Rerun certain parts of the analysis
 
     """
     ===================================
     ========== Load the data ==========
     ===================================
     """
-    idx = pd.IndexSlice
-    # Load sim data
-    sim_data = pd.read_pickle('../data/motif_library/gnw_networks/all_sim_compiled_for_gse69822.pkl')
-    sim_data = sim_data.loc['y', idx[:, :, 1, :]]
-    sim_data.columns = sim_data.columns.remove_unused_levels()
-    sim_data.columns.set_names(['replicate', 'time'], level=[1, 3], inplace=True)
 
+    # NOTE: This process currently assumes some intermediate information is already saved
     # Prep the raw data
     project_name = "GSE69822"
-    t = [0, 15, 40, 90, 180, 300]
-    # Features of the samples taken that are used in calculating statistics
-    sample_features = ['condition', 'replicate', 'time']
-
-    raw = load_data('../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt', sample_features, bg_shift=False)
-    ensembl_to_hgnc = pd.read_csv('../data/GSE69822/mcf10a_gene_names.csv', index_col=0)
-    hgnc_to_ensembl = ensembl_to_hgnc.reset_index().set_index('hgnc_symbol')
 
     # Labels that can be used when making DE contrasts used by limma. This helps with setting defaults
     contrast_labels = ['condition', 'time']
 
-    # Remove unnecessary data
-    basic_data = raw.loc[:, ['ko', 'ki', 'wt']]
+    # Features of the samples taken that are used in calculating statistics
+    sample_features = ['condition', 'replicate', 'time']
 
-    # sim_dea = DEAnalysis(sim_data, reference_labels=contrast_labels, index_names=sample_features)
+    # Load sim dea
+    sim_data = load_sim_data(compiled_sim)
     sim_path = "{}/{}_sim.pkl".format(project_name, project_name)
-    # sim_dea.to_pickle(sim_path)
-    sim_dea = pd.read_pickle(sim_path)
+    sim_dea = load_sim_dea(sim_path, sim_data, contrast_labels, sample_features,
+                           override=override)
 
+    raw = load_data(rna_seq, sample_features, bg_shift=False)
+    tx_to_gene = pd.read_csv(gene_names, index_col=0)
+
+    # Remove unnecessary data
+    basic_data = raw.loc[:, ['ko', 'ki', 'wt']].copy()
     """
         ===================================
         ============= Training ============
         ===================================
     """
-    e_condition = 'ko'  # The experimental condition used
-    c_condition = 'wt'  # The control condition used
     dde = DDE(project_name)
-
-    override = False  # Rerun certain parts of the analysis
 
     matches = dde.train(basic_data, project_name, sim_dea, experimental=e_condition,
                         counts=True, log2=False, override=override)
-
-    g = matches.groupby('true_gene')
 
     """
         ====================================
         ============= TESTING ==============
         ====================================
     """
-    t_condition = 'ki'  # The test condition
 
     tr = dde.score(project_name, t_condition, c_condition, plot=False)
 
@@ -257,7 +295,6 @@ def main():
     plt.close()
 
     censored = tr[tr.group_dev < (3 * tr.group_dev.std())]
-    kinon = tr[tr.ki_cluster != '(0, 0, 0, 0, 0, 0)']
     n_top, top_val = elbow_criteria(range(len(censored)), censored.mean_abs_lfc)
     plt.plot(range(len(censored)), censored.mean_abs_lfc / censored.mean_abs_lfc.max(), label='sorted mean dev')
     plt.plot([n_top, n_top], [0, 1], 'k', label='cutoff')
@@ -291,8 +328,6 @@ def main():
         "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/running_stats.pdf",
         fmt='pdf')
     plt.close()
-
-    confint = dde.dea.results['ki-wt'].get_confint(dde.dea.times)
 
     # ### Figure organization
 
@@ -336,22 +371,22 @@ def main():
     plt.figure(figsize=(22, 10))
     gs = gridspec.GridSpec(1, 2, width_ratios=[3, 1], wspace=0.4)
     # Create a gridspec within the gridspec. 1 row and 2 columns, specifying width ratio
-    gs_left = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[1], hspace=0.5)
+    gs_right = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[1], hspace=0.5)
 
-    gs_right = gridspec.GridSpecFromSubplotSpec(2, 4, subplot_spec=gs[0],
+    gs_left = gridspec.GridSpecFromSubplotSpec(2, 4, subplot_spec=gs[0],
                                                 hspace=0.5, width_ratios=[1, 1, 1, 0.1])
-    auroc_ax = plt.subplot(gs_left[0, 0])
-    box_ax = plt.subplot(gs_left[1, 0])
+    auroc_ax = plt.subplot(gs_right[0, 0])
+    box_ax = plt.subplot(gs_right[1, 0])
 
-    high_pred_ax = plt.subplot(gs_right[0, 0])
-    med_pred_ax = plt.subplot(gs_right[0, 1])
-    low_pred_ax = plt.subplot(gs_right[0, 2])
-    high_net_ax = plt.subplot(gs_right[1, 0])
-    med_net_ax = plt.subplot(gs_right[1, 1])
-    low_net_ax = plt.subplot(gs_right[1, 2])
-    hidden_ax = plt.subplot(gs_right[0, 3])
+    high_pred_ax = plt.subplot(gs_left[0, 0])
+    med_pred_ax = plt.subplot(gs_left[0, 1])
+    low_pred_ax = plt.subplot(gs_left[0, 2])
+    high_net_ax = plt.subplot(gs_left[1, 0])
+    med_net_ax = plt.subplot(gs_left[1, 1])
+    low_net_ax = plt.subplot(gs_left[1, 2])
+    hidden_ax = plt.subplot(gs_left[0, 3])
     hidden_ax.axis('off')
-    cbar_ax = plt.subplot(gs_right[1, 3])
+    cbar_ax = plt.subplot(gs_left[1, 3])
 
     box_data = [tr.percent, top.percent]
     df = pd.concat(box_data, keys=color_dict.keys()).reset_index()
@@ -417,7 +452,7 @@ def main():
         line.set_solid_capstyle('butt')
 
     gene = top.index[29]
-    plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, ensembl_to_hgnc,
+    plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
                          ax=high_pred_ax)
     high_pred_ax.set_ylabel('Expression')
 
@@ -436,7 +471,7 @@ def main():
     plot_net(high_net_ax, node_info, models, labels)
 
     gene = tr.sort_values('percent', ascending=False).index[0]
-    plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, ensembl_to_hgnc,
+    plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
                          ax=med_pred_ax)
 
     labels = ['G', 'x', 'y']
@@ -454,7 +489,7 @@ def main():
     plot_net(med_net_ax, node_info, models, labels)
 
     gene = tr.sort_values('percent', ascending=False).index[30]
-    plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, ensembl_to_hgnc,
+    plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
                          ax=low_pred_ax)
     low_pred_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
     labels = ['G', 'x', 'y']
