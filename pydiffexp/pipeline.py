@@ -35,9 +35,13 @@ class DynamicDifferentialExpression(object):
         self.match = None           # type: pd.DataFrame
         self.dde_genes = None       # type: pd.DataFrame
         self.times = None           # type: list
+        self.sim_dea = None         # type: DEAnalysis
 
         # There is a lot of intermediary data that can be saved to make rerunning the analysis easier
         self.set_save_directory(directory)
+        self.dea_path = None
+        self.scores_path = None
+        self.corr_path = None
 
     def set_save_directory(self, path):
         """
@@ -79,14 +83,6 @@ class DynamicDifferentialExpression(object):
             pass
 
         return sim_stats
-
-    @staticmethod
-    def _sim_filter_default():
-        """
-        Default args for the simulation results
-        :return:
-        """
-        return {'perturbation': 1, 'gene': 'y'}
 
     def score(self, prefix, exp, ctrl, sim_predictions=None, sim_filter=None,
               f=None, reduced_set=True, plot=False):
@@ -514,9 +510,21 @@ class DynamicDifferentialExpression(object):
         pred = baseline+pred_lfc
         return pred
 
+    def set_paths(self, prefix, contrast):
+        """
+        Set paths for intermediate data
+        :param prefix:
+        :param contrast:
+        :return:
+        """
+        prepend = '{}_{}'.format(prefix, contrast)
+        self.dea_path = os.path.join(self.dir, '{}_dea.pkl'.format(prepend))
+        self.scores_path = os.path.join(self.dir, '{}_scores.pkl'.format(prepend))
+        self.corr_path = os.path.join(self.dir, '{}_data_to_sim_corr.pkl'.format(prepend))
+        return
 
     def train(self, data, prefix, sim_dea, times=None, override=False, experimental='ko',
-              control='wt', sim_experimental='ko', sim_filter=None, **kwargs):
+              control='wt', sim_experimental='ko', **kwargs):
         """
         Train DDE estimators
         :param data:
@@ -532,19 +540,12 @@ class DynamicDifferentialExpression(object):
         :return:
         """
 
-        # Which simulation conditions to look at
-        if sim_filter is None:
-            sim_filter = self._sim_filter_default()
-
         # Set conditions
         contrast = "{}-{}".format(experimental, control)
         self.set_training_conditions(experimental, control)
 
         # Define paths to save or read pickles from
-        dea_path = os.path.join(self.dir, '{}_{}_dea.pkl'.format(prefix, contrast))
-        scores_path = os.path.join(self.dir, '{}_{}_scores.pkl'.format(prefix, contrast))
-        sim_path = os.path.join(self.dir, '{}_{}_sim_stats.pkl'.format(prefix, contrast))
-        corr_path = os.path.join(self.dir, '{}_{}_data_to_sim_corr.pkl'.format(prefix, contrast))
+        self.set_paths(prefix, contrast)
 
         # Try to load the DEAnalysis pickle
         try:
@@ -553,10 +554,10 @@ class DynamicDifferentialExpression(object):
                 raise ValueError('Override to retrain')
 
             # Load the dea pickle
-            dea = pd.read_pickle(dea_path)  # type: DEAnalysis
+            dea = pd.read_pickle(self.dea_path)  # type: DEAnalysis
 
             # Load the scores pickle
-            scores = pd.read_pickle(scores_path)
+            scores = pd.read_pickle(self.scores_path)
 
         # Rerun the analysis
         # todo: cleanup this function
@@ -574,16 +575,8 @@ class DynamicDifferentialExpression(object):
         if times is None:
             times = dea.times
 
-        sim_dea.fit_contrasts(sim_dea.default_contrasts)
-
-        # sim_stats = self.load_sim_stats(sim_path, times,
-        #                                 experimental=sim_experimental,
-        #                                 control=control,
-        #                                 **sim_filter)
-        #
-        # sim_stats.sort_index(inplace=True)
-        #
-        # sim_scores = discretize_sim(sim_stats, filter_interesting=False)
+        if len(sim_dea.results) == 0:
+            sim_dea.fit_contrasts(sim_dea.default_contrasts)
 
         sim_scores = sim_dea.results[contrast].score_clustering()
         sim_scores.index = sim_scores.index.astype(int)
@@ -591,20 +584,18 @@ class DynamicDifferentialExpression(object):
         try:
             if override:
                 raise ValueError('Override to retrain')
-            corr = pd.read_pickle(corr_path)
-        except:
+            corr = pd.read_pickle(self.corr_path)
+        except (FileNotFoundError, ValueError):
             corr = self.correlate(filtered_data, sim_dea.data.loc[:, contrast.split('-')])
-            corr.to_pickle(corr_path)
+            corr.to_pickle(self.corr_path)
 
         match = match_to_gene(dde_genes, sim_scores, corr, unique_net=False)
-        # match.set_index(['id', 'perturbation', 'gene'], inplace=True)
         match.sort_values('mean', ascending=False, inplace=True)
         match = match[(match['score'] > 0) & (match['pearson_r'] > 0)]
 
         self.times = times
         self.estimators = match.groupby('true_gene')
         self.match = match
-        # self.sim_stats = sim_stats
         self.sim_dea = sim_dea
         self.corr = corr
         self.sim_scores = sim_scores

@@ -199,6 +199,7 @@ def load_sim_dea(path, sim_data, ref_labels, idx_names, override=False):
 
     except (FileNotFoundError, ValueError):
         sim_dea = DEAnalysis(sim_data, reference_labels=ref_labels, index_names=idx_names)
+        sim_dea.fit_contrasts(sim_dea.default_contrasts)
         sim_dea.to_pickle(path)
 
     return sim_dea
