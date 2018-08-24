@@ -428,7 +428,7 @@ class DynamicDifferentialExpression(object):
                     'avg_e', 'random_avg_e', 'avg_diff', 'all_zeros', 'abs_dev', 'group_dev',
                     'group_cluster']
         s_values = [len(df), magnitude, grouped_error, rg_median, rg_median-grouped_error,
-                    avg_error, rs_median, rs_median-avg_error, all_zeros, test.abs().sum(),
+                    avg_error, rs_median, rs_median-avg_error, all_zeros, test.abs().mean(),
                     group_dev, grouped_cluster]
         s = pd.Series(s_values, index=s_labels)
         return s
