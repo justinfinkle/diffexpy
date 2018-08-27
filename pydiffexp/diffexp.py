@@ -771,7 +771,7 @@ class DEAnalysis(object):
         bayes_fit = limma.eBayes(contrast_fit)
         return bayes_fit
 
-    def _fit_contrast(self, contrasts, samples):
+    def _fit_contrast(self, contrasts, samples, name, status=False):
         """
         Fit the differential expression model using the supplied contrasts.
 
@@ -779,7 +779,8 @@ class DEAnalysis(object):
         lists must be in the format "X-Y". Dictionary elements must be in {contrast_name:"(X1-X0)-(Y1-Y0)").
         :return:
         """
-
+        if status:
+            print(name, end=', ', flush=True)
         # Subset data and design to match contrast samples
         data = rh.pydf_to_rmat(rh.rvect_to_py(self.data_matrix).loc[:, samples])
         design = self._make_model_matrix(rh.rvect_to_py(data.colnames))
@@ -793,7 +794,7 @@ class DEAnalysis(object):
 
         return fit
 
-    def _fit_dict(self, contrast_dict) -> Dict[str, DEResults]:
+    def _fit_dict(self, contrast_dict, status=False) -> Dict[str, DEResults]:
         """
         Make the fits into a dictionary. This is wrapped into a function for type hinting
         :param self:
@@ -802,8 +803,13 @@ class DEAnalysis(object):
         :return:
         """
         # Make fit dictionary
-        fits = {name: DEResults(self._fit_contrast(contrast['contrasts'], contrast['samples']), name=name,
+        if status:
+            print("Fitting contrasts...", end='', flush=True)
+
+        fits = {name: DEResults(self._fit_contrast(contrast['contrasts'], contrast['samples'], name, status), name=name,
                                 fit_type=contrast['fit_type']) for name, contrast in contrast_dict.items()}
+        if status:
+            print("DONE")
         return fits
 
     def _samples_in_contrast(self, contrast: str, split_str='-') -> set:
@@ -879,7 +885,7 @@ class DEAnalysis(object):
 
         return fit_dict
 
-    def fit_contrasts(self, contrasts=None, fit_names=None, force_separate=False):
+    def fit_contrasts(self, contrasts=None, fit_names=None, force_separate=False, status=False):
         """
         Wrapper to fit the differential expression model using the supplied contrasts.
 
@@ -901,7 +907,7 @@ class DEAnalysis(object):
         contrasts_to_fit = self._make_fit_dict(contrasts, fit_names=fit_names, force_separate=force_separate)
 
         # Add/Update Results dictionary
-        self.results.update(self._fit_dict(contrasts_to_fit))
+        self.results.update(self._fit_dict(contrasts_to_fit, status))
         self.contrast_dict = self.match_contrasts()
         self.db = self.make_results_db()
 
