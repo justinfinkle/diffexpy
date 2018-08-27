@@ -1,8 +1,6 @@
-import itertools as it
 import multiprocessing as mp
 import os
 import sys
-import tarfile
 import warnings
 
 import matplotlib.pyplot as plt
@@ -12,7 +10,6 @@ import pandas as pd
 import seaborn as sns
 from pydiffexp import DEAnalysis, DEPlot, pairwise_corr
 from pydiffexp.gnw import GnwNetResults, GnwSimResults, draw_results, get_graph
-from pydiffexp.gnw.sim_explorer import tsv_to_dg
 from scipy import stats
 from sklearn.metrics import mean_squared_error as mse
 
@@ -141,183 +138,6 @@ class DynamicDifferentialExpression(object):
             self.plot_results(test_stats)
 
         return test_stats
-
-    @staticmethod
-    def load_structures(path):
-        return pd.read_csv(path)
-
-    def expected_edges(self, node_dict, net: nx.DiGraph):
-        """
-        Calculate expected edges in a "simplified" network based on the true,
-        full network structure
-        :param node_dict: dict; nodes to include in the simplified model
-        :param net: networkX Digraph; true network structure
-        :return: networkX Digraph; the true, simplified structure
-        """
-
-        # Calculate possible edges in the simplified model
-        possible_edges = list(it.permutations(node_dict.values(), 2))
-
-        # Initialize an empty graph
-        true_graph = nx.DiGraph()
-
-        # For every possible edge, add the edge to the graph if there is path
-        for edge in possible_edges:
-            src, tgt = edge
-
-            # Save the node not involved in the interaction
-            other_node = [n for n in node_dict.values() if n not in edge][0]
-
-            pl = self.shortest_path_length_exclude(net, src, tgt, other_node)
-
-            if pl > 0:
-                true_graph.add_edge(src, tgt)
-
-        return true_graph
-
-    @staticmethod
-    def shortest_path_length_exclude(g, src, tgt, exclude):
-        try:
-            paths = nx.all_simple_paths(g, src, tgt)
-            lengths = [len(path)-1 for path in paths if exclude not in path]
-            return min(lengths)
-
-        except (nx.NetworkXNoPath, ValueError) as e:
-            return 0
-
-    def score_all_topo(self, true_topology):
-        grouped = self.estimators
-        ii = 0
-        max_edges = 6
-        summary = pd.DataFrame()
-        df, dg = tsv_to_dg(true_topology)
-        sim_path = '../data/motif_library/gnw_networks/'
-        edge_dict = {'x': 'G25', 'G': 'G38'}
-        all_stats = {}
-        for gene, data in grouped:
-            print(gene)
-            # Skip control genes for now
-            if gene in edge_dict.values():
-                continue
-            edge_dict['y'] = gene
-            print(self.expected_edges(edge_dict, dg).edges())
-            continue
-            gene_stats = []
-            for id in self.sim_scores.index.get_level_values('id'):
-                topo_path = "{path}/{id}/{id}_goldstandard_signed.tsv".format(path=sim_path,
-                                                                              id=id)
-                _, predicted_structure = tsv_to_dg(topo_path)
-                gene_stats.append(self.calc_topo_stats(predicted_structure, edge_dict, dg, max_edges, id))
-            all_stats[gene] = pd.concat(gene_stats, axis=1)
-        sys.exit()
-        # Create a multiindex
-        all_stats = pd.concat(all_stats.values(), keys=all_stats.keys())
-
-        return all_stats
-
-    def calc_topo_stats(self, predicted_structure, edge_dict, dg, max_edges, id):
-        tg = self.expected_edges(edge_dict, dg)
-        te = len(tg.edges())
-        ne = max_edges - te
-        tp = []
-        fp = 0
-        net_edges = [(edge_dict[e[0]], edge_dict[e[1]]) for e in predicted_structure.edges()]
-        for edge in net_edges:
-            src, tgt = edge
-            try:
-                # Save the node not involved in the interaction
-                other_node = [n for n in edge_dict.values() if n not in edge][0]
-                pl = self.shortest_path_length_exclude(dg, src, tgt, other_node)
-                if pl == 0:
-                    raise nx.NetworkXNoPath
-                tp.append(pl)
-            except nx.NetworkXNoPath:
-                fp += 1
-        fn = 0
-        for edge in tg.edges():
-            if edge not in net_edges:
-                fn += 1
-        tn = max(0, ne - fn)
-        mean_true_path_length = np.mean(tp)
-        ntp = len(tp)
-        gene_stats = [ntp / te, ntp + fp, fp / (ntp + fp), 2 * ntp / (2 * ntp + fp + fn),
-                      (ntp + tn) / (ntp + fp + fn + tn), mean_true_path_length]
-        gene_data = pd.Series(gene_stats, index=['TPR', 'total_edges', 'FDR', 'F1', 'ACC', 'mean_tp_length'])
-        gene_data.name = id
-        return gene_data
-
-    def score_topology(self, true_topology, estimators=None):
-        if estimators is None:
-            grouped = self.estimators
-        else:
-            grouped = estimators
-
-        ii = 0
-        max_edges = 6
-        summary = pd.DataFrame()
-        df, dg = tsv_to_dg(true_topology)
-        sim_path = '../data/motif_library/gnw_networks/'
-        edge_dict = {'x': 'G25', 'G': 'G38'}
-
-        #todo: this needs to be functionalized
-        for gene, data in grouped:
-            # Skip control genes for now
-            if gene in edge_dict.values():
-                continue
-
-            edge_dict['y'] = gene
-            tg = self.expected_edges(edge_dict, dg)
-            te = len(tg.edges())
-            ne = max_edges - te
-            gene_stats = []
-            for row, info in data.iterrows():
-                # print(info['id'])
-                _, net = tsv_to_dg("{path}/{id}/{id}_goldstandard_signed.tsv".format(path=sim_path, id=info.name[0]))
-                tp = []
-                fp = 0
-                net_edges = [(edge_dict[e[0]], edge_dict[e[1]]) for e in net.edges()]
-                for edge in net_edges:
-                    src, tgt = edge
-                    try:
-                        # Save the node not involved in the interaction
-                        other_node = [n for n in edge_dict.values() if n not in edge][0]
-                        pl = self.shortest_path_length_exclude(dg, src, tgt, other_node)
-                        if pl == 0:
-                            raise nx.NetworkXNoPath
-                        tp.append(pl)
-                    except nx.NetworkXNoPath:
-                        fp += 1
-                fn = 0
-                for edge in tg.edges():
-                    if edge not in net_edges:
-                        fn += 1
-                tn = max(0, ne - fn)
-                mean_true_path_length = np.mean(tp)
-                ntp = len(tp)
-                gene_stats.append([ntp / te, ntp + fp, fp / (ntp + fp), 2 * ntp / (2 * ntp + fp + fn),
-                                   (ntp + tn) / (ntp + fp + fn + tn), mean_true_path_length])
-            gene_data = pd.DataFrame(gene_stats, data.index.get_level_values('id').values,
-                                     columns=['TPR', 'total_edges', 'FDR', 'F1', 'ACC', 'mean_tp_length'])
-            gene_mean = pd.DataFrame(gene_data.mean())
-            gene_mean.columns = [gene]
-            gene_mean = gene_mean.T
-            gene_mean['true_edges'] = te
-            summary = pd.concat([summary, gene_mean], axis=0)
-            ii += 1
-        return summary
-        # print(summary)
-        # colors = qualitative.Bold_10.mpl_colors
-        # plt.figure(figsize=(5, 8))
-        # sns.set_style("whitegrid")
-        # sns.boxplot(data=summary.loc[:, ['TPR', 'FDR', 'ACC', 'F1']], width=0.5, palette=colors, showfliers=False)
-        # sns.swarmplot(data=summary.loc[:, ['TPR', 'FDR', 'ACC', 'F1']], color='0.2')
-        # # plt.plot([-1,3], [0.5, 0.5], '--', c=colors[2], label='Random')
-        # plt.ylim([0, 1])
-        # # plt.xticks(rotation='vertical')
-        # # plt.ylabel('Value')
-        # plt.tight_layout()
-        # plt.show()
-        # sys.exit()
 
     @staticmethod
     def plot_results(x):
@@ -691,37 +511,6 @@ class DynamicDifferentialExpression(object):
                      "\nTo save object please rerun with a different file path or choose to rewrite")
 
         return
-
-
-def load_data(path, bg_shift=True, **kwargs):
-    """
-
-    :param path:
-    :param bg_shift:
-    :param kwargs:
-    :return:
-    """
-    kwargs.setdefault('sep', ',')
-    kwargs.setdefault('index_col', 0)
-
-    # Load original data
-    raw_data = pd.read_csv(path, **kwargs)
-
-    if bg_shift:
-        raw_data[raw_data <= 0] = 1
-    return raw_data
-
-
-def compress_directory(directory, source='.'):
-    """
-    Compress a directory to a tarball
-    :param directory:
-    :param source:
-    :return:
-    """
-    with tarfile.open("{}.tar.gz".format(directory), 'w:gz') as tar:
-        tar.add(directory, arcname=os.path.basename(source))
-    tar.close()
 
 
 def compile_sim(sim_dir, times, save_path=None, pp=True, **kwargs):
