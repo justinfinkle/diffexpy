@@ -806,10 +806,18 @@ class DEAnalysis(object):
         if status:
             print("Fitting contrasts...", end='', flush=True)
 
-        fits = {name: DEResults(self._fit_contrast(contrast['contrasts'], contrast['samples'], name, status), name=name,
-                                fit_type=contrast['fit_type']) for name, contrast in contrast_dict.items()}
+        fits = {}
+        for name, c in contrast_dict.items():
+
+            # Carry out the fit in R
+            r_fit = self._fit_contrast(c['contrasts'], c['samples'], name, status)
+
+            # Add the DER to the dictionary
+            fits[name] = DEResults(r_fit, name=name, fit_type=c['fit_type'])
+
         if status:
             print("DONE")
+
         return fits
 
     def _samples_in_contrast(self, contrast: str, split_str='-') -> set:
