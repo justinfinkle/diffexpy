@@ -249,6 +249,7 @@ def main():
     sim_path = "{}/{}_sim.pkl".format(project_name, project_name)
     sim_dea = load_sim_dea(sim_path, sim_data, contrast_labels, sample_features,
                            override=override)
+    t = [0, 15, 40, 90, 180, 300]
 
     raw = load_data(rna_seq, sample_features, bg_shift=False)
     tx_to_gene = pd.read_csv(gene_names, index_col=0)
