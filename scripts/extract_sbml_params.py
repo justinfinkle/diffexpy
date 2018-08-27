@@ -14,15 +14,15 @@ def get_rxn_info(key, rxn):
     info.name = key
     return info
 
-nets = [0, 1]
+nets = [0, 1, 2, 3]
 conditions = ['wt', 'ki', 'ko']
 for n in nets:
     for c in conditions:
         print(n, c)
-        tsv_path = "/Volumes/Hephaestus/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/example_nets/" \
+        tsv_path = "/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/example_nets/" \
                    "{}/{}_sim/{}_{}_goldstandard_signed.tsv".format(n, c, n, c)
         jar_loc = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/gnw/gnw-3.1.2b.jar'
-        sbml_path = '/Volumes/Hephaestus/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/example_nets/' \
+        sbml_path = '/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/example_nets/' \
                     '{}/{}_sim/{}_{}.xml'.format(n, c, n, c)
 
         df, dg = tsv_to_dg(tsv_path)
@@ -36,5 +36,5 @@ for n in nets:
         all_rxn = [get_rxn_info(k, r) for k, r in reactions.items()]
 
         params = pd.concat(all_rxn, axis=1).T
-        params.to_pickle('/Volumes/Hephaestus/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/example_nets/'
+        params.to_pickle('/Users/jfinkle/Documents/Northwestern/MoDyLS/Code/Python/pydiffexp/data/example_nets/'
                          '{}/{}_sim/{}_{}_sbml_params.pkl'.format(n, c, n, c))
