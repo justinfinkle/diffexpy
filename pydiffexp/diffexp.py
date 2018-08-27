@@ -73,7 +73,7 @@ def get_scores(grouped_df, de_df, weighted_df):
         scores = pd.DataFrame(grouped_df.apply(group_scores, de_df, weighted_df))
     if 'gene' not in scores.index.names:
         scores.index.set_names('gene', level=1, inplace=True)
-    scores = scores.reset_index().sort_values(['Cluster', 'score'], ascending=[False, False]).set_index('gene')
+    scores = scores.reset_index().sort_values(['Cluster', 'cscore'], ascending=[False, False]).set_index('gene')
     scores.fillna(0, inplace=True)
     return scores
 
@@ -95,16 +95,12 @@ def group_scores(cluster, de: pd.DataFrame, weighted_de: pd.DataFrame):
     penalty = (correct_de*diff + (~correct_de)*clus_wde).abs().sum(axis=1)
     reward = (correct_de*clus_wde + (~correct_de)*diff).abs().sum(axis=1)
 
-    # scores = np.abs(clus_wde).values * penalty + np.abs(clus_wde).values * (penalty == 0)  # type: np.ndarray
-
     # Calculate fraction of the lfc that was retained
     score_frac = (reward-penalty)/clus_de.abs().sum(axis=1)
-    # score_frac = np.sum(scores, axis=1)/np.sum(np.abs(de_df.loc[cluster.index]).values, axis=1)
-    # score_frac = 1 - (de.loc[cluster.index] - clus_wde).abs().sum(axis=1) / de.loc[cluster.index].abs().sum(axis=1)
-    score_frac.name = 'score'
+
+    score_frac.name = 'cscore'
 
     return score_frac
-    # return pd.Series(data=score_frac, index=cluster.index, name='score')
 
 
 class MArrayLM(object):
@@ -362,8 +358,8 @@ class DEResults(MArrayLM):
 
         # Score the clustering
         scores = get_scores(grouped, self.continuous.loc[:, self.p_value.columns], weighted_lfc).sort_index()
-        scores['score'] = scores['score']*(1-self.continuous['adj_pval']).sort_index().values
-        scores.sort_values('score', ascending=False, inplace=True)
+        scores['cscore'] = scores['cscore']*(1-self.continuous['adj_pval']).sort_index().values
+        scores.sort_values('cscore', ascending=False, inplace=True)
 
         return scores
 
@@ -382,7 +378,7 @@ class DEResults(MArrayLM):
         df = df.loc[df[col].apply(ast.literal_eval).apply(set).apply(len) >= thresh]
 
         # Remove genes with a low cluster score
-        df = df[(df.score > s)].copy()
+        df = df[(df.cscore > s)].copy()
         df.sort_values(col, inplace=True)
 
         return df
