@@ -1,4 +1,3 @@
-import ast
 import itertools as it
 import multiprocessing as mp
 import os
@@ -10,8 +9,8 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from pydiffexp import DEAnalysis, DEPlot, get_scores, cluster_discrete, pairwise_corr
-from pydiffexp.gnw import mk_ch_dir, GnwNetResults, GnwSimResults, draw_results, get_graph
+from pydiffexp import DEAnalysis, DEPlot, pairwise_corr
+from pydiffexp.gnw import GnwNetResults, GnwSimResults, draw_results, get_graph
 from pydiffexp.gnw.sim_explorer import tsv_to_dg
 from scipy import stats
 from sklearn.metrics import mean_squared_error as mse
@@ -555,17 +554,13 @@ class DynamicDifferentialExpression(object):
             # Load the dea pickle
             dea = pd.read_pickle(self.dea_path)  # type: DEAnalysis
 
-            # Load the scores pickle
-            scores = pd.read_pickle(self.scores_path)
-
         # Rerun the analysis
-        # todo: cleanup this function
         except (FileNotFoundError, ImportError, ValueError) as e:
-            dea = self.fit_de(data, contrast, **kwargs)
+            dea = self.fit_de(data, **kwargs)
 
-        dde_genes = filter_dde(scores, thresh=2, p=1).sort_values('Cluster', ascending=False)
+        dde_genes = dea.results[contrast].get_dDegs()
 
-        # Also filter out genes that dont' pass the basic pairwise test
+        # Also filter out genes that don't pass the basic pairwise test
         genes = set(dde_genes.index).intersection(dea.results[contrast].top_table(p=0.05).index)
         dde_genes = dde_genes.loc[genes].copy()
 
@@ -603,7 +598,8 @@ class DynamicDifferentialExpression(object):
 
         return match
 
-    def fit_de(self, data, default_contrast, **kwargs):
+    @staticmethod
+    def fit_de(data, **kwargs):
         """
 
         :param data:
@@ -615,16 +611,9 @@ class DynamicDifferentialExpression(object):
         kwargs.setdefault('reference_labels', ['condition', 'time'])
         kwargs.setdefault('index_names', ['condition', 'replicate', 'time'])
 
-        # Make the project directory to store the output
-        project_path = os.path.abspath(self.dir)
-        dir_name = os.path.split(project_path)[1]
-        print("Saving project files to {}".format(project_path))
-        mk_ch_dir(project_path, ch=False)
-        prefix = "{}/{}_{}_".format(project_path, dir_name, default_contrast)
-
+        # Make the dea object and fit it
         dea = DEAnalysis(data, **kwargs)
-        dea.fit_contrasts(dea.default_contrasts)
-        dea.to_pickle("{}dea.pkl".format(prefix), force_save=True)
+        dea.fit_contrasts(dea.default_contrasts, status=True)
 
         return dea
 
@@ -701,41 +690,6 @@ def compile_sim(sim_dir, times, save_path=None, pp=True, **kwargs):
     if save_path is not None:
         sim_results.to_pickle(save_path)
     return sim_results
-
-
-def filter_dde(df, col='Cluster', thresh=2, s=0):
-    """
-    Filter out dde genes that are "uninteresting". They have fewer unique discrete labels than the threshold
-    e.g. thresh=2 and Cluster = (1,1,1,1) will have only 1 unique label, and will be filtered out.
-    :param df:
-    :param col:
-    :param s: score threshold
-    :param thresh: number of different LFCs
-    :return:
-    """
-    df = df.loc[df[col].apply(ast.literal_eval).apply(set).apply(len) >= thresh]
-    df = df[(df.score > s)]
-    return df
-
-
-def discretize_sim(sim_data: pd.DataFrame, p=0.05, filter_interesting=True, fillna=True):
-    if fillna:
-        sim_data.fillna(0, inplace=True)
-
-    weighted_lfc = ((1 - sim_data.loc[:, 'lfc_pvalue']) * sim_data.loc[:, 'lfc'])
-    discrete = sim_data.loc[:, 'lfc'].apply(np.sign).astype(int)
-    clusters = cluster_discrete((discrete * (sim_data.loc[:, 'lfc_pvalue'] < p)))
-    g = clusters.groupby('Cluster')
-    scores = get_scores(g, sim_data.loc[:, 'lfc'], weighted_lfc).sort_index()
-
-    if filter_interesting:
-        scores = filter_dde(scores)
-
-    # Reorganize the index to match the input one
-    scores.set_index(['perturbation', 'id'], append=True, inplace=True)
-    scores = scores.swaplevel(i='id', j='gene').sort_index()
-
-    return scores
 
 
 def get_net_data(network, stim, directory, conditions):

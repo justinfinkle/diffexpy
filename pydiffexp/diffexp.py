@@ -184,6 +184,7 @@ class DEResults(MArrayLM):
         self.discrete_clusters = cluster_discrete(self.discrete)                        # type: pd.DataFrame
         self.cluster_count = self.count_clusters(self.discrete_clusters)                # type: pd.DataFrame
         self.all_results = self.aggregate_results()                                     # type: pd.DataFrame
+        self.cluster_scores = self.score_clustering()                                   # type: pd.DataFrame
 
     def aggregate_results(self):
         """
@@ -351,9 +352,9 @@ class DEResults(MArrayLM):
         df = rh.rvect_to_py(decide).astype(int)
         return df
 
-    def score_clustering(self, grouped=None, ind_p=0.05):
+    def score_clustering(self, grouped=None, ind_p=0.05) -> pd.DataFrame:
         # Calculate the weighted log fold change as lfc*(1-pvalue) at each time point
-        weighted_lfc = (1 - self.p_value) * self.continuous.loc[self.p_value.index, self.p_value.columns]
+        weighted_lfc = (-self.p_value+1) * self.coefficients
 
         # Group genes by clusters
         if grouped is None:
@@ -365,6 +366,26 @@ class DEResults(MArrayLM):
         scores.sort_values('score', ascending=False, inplace=True)
 
         return scores
+
+    def get_dDegs(self, col='Cluster', thresh=2, s=0):
+        """
+        Filter out dde genes that are "uninteresting". They have fewer unique discrete labels than the threshold
+        e.g. thresh=2 and Cluster = (1,1,1,1) will have only 1 unique label, and will be filtered out.
+        :param df:
+        :param col:
+        :param s: score threshold
+        :param thresh: number of different LFCs
+        :return:
+        """
+        df = self.cluster_scores
+        # Remove genes that only have one DE sign
+        df = df.loc[df[col].apply(ast.literal_eval).apply(set).apply(len) >= thresh]
+
+        # Remove genes with a low cluster score
+        df = df[(df.score > s)].copy()
+        df.sort_values(col, inplace=True)
+
+        return df
 
 
 class DEAnalysis(object):
