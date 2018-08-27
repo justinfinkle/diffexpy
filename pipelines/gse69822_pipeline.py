@@ -1,12 +1,8 @@
-import sys
-
-from palettable.cartocolors.qualitative import Bold_8
-import numpy as np
 import pandas as pd
 import seaborn as sns
-from pydiffexp import DynamicDifferentialExpression, DEAnalysis, DEPlot, cluster_discrete
+from palettable.cartocolors.qualitative import Bold_8
+from pydiffexp import DynamicDifferentialExpression
 from pydiffexp.gnw import mk_ch_dir
-import matplotlib.pyplot as plt
 
 
 def load_data(path, bg_shift=True, **kwargs):
@@ -57,7 +53,7 @@ if __name__ == '__main__':
     e_condition = 'ko'  # The experimental condition used
     c_condition = 'wt'  # The control condition used
     dde = DynamicDifferentialExpression(project_name)
-    matches = dde.train(raw, project_name, experimental=e_condition,
+    matches = dde.train(raw, project_name, exp=e_condition,
                         voom=True)
 
     g = matches.groupby('true_gene')

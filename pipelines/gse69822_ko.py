@@ -12,7 +12,7 @@ from matplotlib.patches import FancyArrowPatch, ArrowStyle
 from matplotlib.transforms import Affine2D
 from palettable.cartocolors.diverging import Earth_7
 from palettable.cartocolors.qualitative import Bold_8, Prism_10
-from pydiffexp import DEPlot, DEAnalysis
+from pydiffexp import DEPlot
 from pydiffexp.pipeline import DynamicDifferentialExpression as DDE
 from pydiffexp.plot import elbow_criteria
 from pydiffexp.utils import multiindex_helpers as mi
@@ -189,22 +189,6 @@ def load_sim_data(path, node='y', perturb: Union[int, tuple, None]=1):
     return sim_data
 
 
-def load_sim_dea(path, sim_data, ref_labels, idx_names, override=False):
-    try:
-        # If the user wants to override, raise a ValueError to force exception
-        if override:
-            raise ValueError('Override to retrain')
-
-        sim_dea = pd.read_pickle(path)
-
-    except (FileNotFoundError, ValueError):
-        sim_dea = DEAnalysis(sim_data, reference_labels=ref_labels, index_names=idx_names)
-        sim_dea.fit_contrasts(sim_dea.default_contrasts)
-        sim_dea.to_pickle(path)
-
-    return sim_dea
-
-
 def main():
     """
      ===================================
@@ -238,39 +222,39 @@ def main():
     # Prep the raw data
     project_name = "GSE69822"
 
-    # Labels that can be used when making DE contrasts used by limma. This helps with setting defaults
-    contrast_labels = ['condition', 'time']
-
     # Features of the samples taken that are used in calculating statistics
     sample_features = ['condition', 'replicate', 'time']
 
-    # Load sim dea
+    # Load sim data
     sim_data = load_sim_data(compiled_sim)
-    sim_path = "{}/{}_sim.pkl".format(project_name, project_name)
-    sim_dea = load_sim_dea(sim_path, sim_data, contrast_labels, sample_features,
-                           override=override)
-    t = [0, 15, 40, 90, 180, 300]
 
     raw = load_data(rna_seq, sample_features, bg_shift=False)
     tx_to_gene = pd.read_csv(gene_names, index_col=0)
 
     # Remove unnecessary data
-    basic_data = raw.loc[:, ['ko', 'ki', 'wt']].copy()
+    basic_data = raw.loc[:, [e_condition, t_condition, c_condition]].copy()
     """
         ===================================
         ============= Training ============
         ===================================
     """
-    dde = DDE(project_name)
+    # dde = DDE(project_name)
+    # dde.train(project_name, basic_data, sim_data, exp=e_condition, override=override)
+    # # A lot went into the training. We should save the results
+    # dde.to_pickle()
 
-    matches = dde.train(basic_data, project_name, sim_dea, experimental=e_condition,
-                        counts=True, log2=False, override=override)
+    dde = pd.read_pickle('GSE69822/GSE69822_ko-wt_dde.pkl') # type: DDE
+
+    matches = dde.match
+    sim_dea = dde.sim_dea
 
     """
         ====================================
         ============= TESTING ==============
         ====================================
     """
+    predictions = dde.predict(t_condition, project_name)
+
 
     tr = dde.score(project_name, t_condition, c_condition, plot=False)
 

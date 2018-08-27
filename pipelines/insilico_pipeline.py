@@ -2,16 +2,11 @@ import itertools as it
 import sys
 
 import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
 import pandas as pd
-from pydiffexp import gnw, DynamicDifferentialExpression
+import seaborn as sns
 from palettable.cartocolors.qualitative import Bold_8
-from pydiffexp import pipeline as pl
-from scipy import stats
-from scipy.spatial.distance import hamming
-from sklearn.metrics import mean_absolute_error as mae
-from sklearn.metrics import mean_squared_error as mse
+from pydiffexp import gnw, DynamicDifferentialExpression
 
 
 def load_insilico_data(path, conditions, stimuli, net_name, times=None) -> pd.DataFrame:
@@ -117,7 +112,7 @@ if __name__ == '__main__':
     e_condition = 'ko'  # The experimental condition used
     c_condition = 'wt'  # The control condition used
     dde = DynamicDifferentialExpression(project_name)
-    matches = dde.train(clean_data, project_name, experimental=e_condition,
+    matches = dde.train(clean_data, project_name, exp=e_condition,
                         voom=True)
     # g = matches.groupby('true_gene')
 
