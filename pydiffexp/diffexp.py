@@ -792,7 +792,7 @@ class DEAnalysis(object):
         bayes_fit = limma.eBayes(contrast_fit)
         return bayes_fit
 
-    def _fit_contrast(self, contrasts, samples, name, status=False):
+    def _fit_contrast(self, contrasts, samples):
         """
         Fit the differential expression model using the supplied contrasts.
 
@@ -800,8 +800,6 @@ class DEAnalysis(object):
         lists must be in the format "X-Y". Dictionary elements must be in {contrast_name:"(X1-X0)-(Y1-Y0)").
         :return:
         """
-        if status:
-            print(name, end=', ', flush=True)
         # Subset data and design to match contrast samples
         data = rh.pydf_to_rmat(rh.rvect_to_py(self.data_matrix).loc[:, samples])
         design = self._make_model_matrix(rh.rvect_to_py(data.colnames))
@@ -829,9 +827,11 @@ class DEAnalysis(object):
 
         fits = {}
         for name, c in contrast_dict.items():
+            if status:
+                print(name, end=', ', flush=True)
 
             # Carry out the fit in R
-            r_fit = self._fit_contrast(c['contrasts'], c['samples'], name, status)
+            r_fit = self._fit_contrast(c['contrasts'], c['samples'])
 
             # Add the DER to the dictionary
             fits[name] = DEResults(r_fit, name=name, fit_type=c['fit_type'])
