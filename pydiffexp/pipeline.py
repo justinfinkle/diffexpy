@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from pydiffexp import DEAnalysis, DEPlot, pairwise_corr
 from pydiffexp.gnw import GnwNetResults, GnwSimResults, draw_results, get_graph
 from scipy import stats
@@ -60,47 +59,42 @@ class DynamicDifferentialExpression(object):
         return
 
     @staticmethod
-    def load_sim_stats(path, times, experimental, control, **kwargs):
+    def calc_error(pred_lfc, true_lfc, save_path, f):
         try:
-            sim_stats = pd.read_pickle(path)  # type: pd.DataFrame
+            gene_to_model_error = pd.read_pickle(save_path)
 
-        except:
-            sim_stats = compile_sim('../data/motif_library/gnw_networks/',
-                                    times=times, save_path=path,
-                                    experimental=experimental, control=control)
+        except FileNotFoundError:
+            # Create a dictionary of each simulations prediction to each matched gene
+            # This is the distribution of the null model for randomly chosen models
 
-        # Reduce the dataframe if a slicer is passed
-        try:
+            print('Calculating model error distributions...', end='', flush=True)
+            gene_err_dist_dict = {ii: [f(pwlfc, twlfc) for pwlfc in pred_lfc.values]
+                                  for ii, twlfc in true_lfc.iterrows()}
 
-            # Filter the axes
-            mi_filter = [kwargs[level] if level in kwargs.keys() else slice(None)
-                         for level in sim_stats.index.names]
-            sim_stats = sim_stats.loc[tuple(mi_filter), :].copy()
+            gene_to_model_error = pd.DataFrame.from_dict(gene_err_dist_dict,
+                                                         orient='index')
 
-        except TypeError:
-            pass
+            # # Set the columns to match the models
+            gene_to_model_error.columns = pred_lfc.index
+            gene_to_model_error.to_pickle(save_path)
+            print('DONE')
 
-        return sim_stats
+        return gene_to_model_error
 
-    def score(self, prefix, exp, ctrl, sim_predictions=None, sim_filter=None,
-              f=None, reduced_set=True, plot=False):
-
+    def score(self, exp, ctrl, f=None, reduced_set=True) -> pd.DataFrame:
+        # Set the error function
         if f is None:
             f = mse
 
         contrast = "{}-{}".format(exp, ctrl)
+        train_contrast = "{}-{}".format(self.training['experimental'],
+                                        self.training['control'])
 
         true_der = self.dea.results[contrast]
         true_lfc = true_der.top_table().iloc[:, :len(self.times)]
 
-        if sim_predictions is None:
-            sim_path = os.path.join(self.dir,
-                                    '{}_{}_sim_stats.pkl'.format(prefix,
-                                                                 contrast))
+        pred = self.predict(exp)
 
-            # Get the predicted values
-            sim_predictions = self.load_sim_stats(sim_path, self.times, exp, ctrl,
-                                                  **sim_filter)
         pred_der = self.sim_dea.results[contrast]
         pred_lfc = pred_der.top_table().iloc[:, :len(self.times)]
         pred_lfc.index = pred_lfc.index.astype(int)
@@ -111,50 +105,28 @@ class DynamicDifferentialExpression(object):
         if reduced_set:
             true_lfc = true_lfc.loc[list(set(self.match['train_gene']))]
 
-        # Create a dictionary of each simulations prediction to each matched gene
-        # This is the distribution of the null model for randomly chosen models
-        # gene_err_dist_dict = {ii: [f(pwlfc, twlfc) for pwlfc in pred_lfc.values]
-        #                       for ii, twlfc in true_lfc.iterrows()}
-        # #
-        # gene_to_model_error = pd.DataFrame.from_dict(gene_err_dist_dict,
-        #                                              orient='index')
-        # #
-        # # # Set the columns to match the models
-        # gene_to_model_error.columns = pred_lfc.index
-        # gene_to_model_error.to_pickle('gtme.pkl')
-        gene_to_model_error = pd.read_pickle('gtme.pkl')
+        fname = "{}_{}_pred_{}_gtme.pkl".format(self.project, train_contrast, contrast)
+        gtme_path = os.path.join(self.dir, fname)
+        gtme = self.calc_error(pred_lfc, true_lfc, gtme_path, f)
+
 
         # Calculate null model
-        null_stats = self.estimators.apply(self.sample_stats, gene_to_model_error,
-                                           true_lfc, pred_lfc, true_der, train_lfc)
+        null_stats = self.estimators.apply(self.sample_stats, gtme, true_lfc,
+                                           pred_lfc, true_der, train_lfc)
 
         # Combine the stats together
-        test_stats = pd.concat([self.ddegs, null_stats], axis=1).dropna()
+        train_cluster = self.dea.results[train_contrast].cluster_scores.loc[self.ddegs]
+        test_stats = pd.concat([train_cluster, null_stats], axis=1).dropna()
 
         # Add known cluster info in
         test_stats['ki_cluster'] = true_der.score_clustering().loc[test_stats.index, 'Cluster']
 
-        if plot:
-            self.plot_results(test_stats)
+        # Add the LFC data in as a predictor
+        train_der = self.dea.results[train_contrast]
+        test_stats['mean_abs_lfc'] = train_der.coefficients.loc[test_stats.index].abs().mean(axis=1)
+        test_stats['percent'] = test_stats.grouped_diff / test_stats.random_grouped_e * 100
 
         return test_stats
-
-    @staticmethod
-    def plot_results(x):
-        print(x)
-        print(np.median(x.grouped_diff), np.mean(x.grouped_diff), stats.wilcoxon(x.grouped_diff).pvalue/2)
-        print(np.median(x.avg_diff), np.mean(x.avg_diff), stats.wilcoxon(x.avg_diff).pvalue/2)
-        melted = pd.melt(x, id_vars=x.columns[:4], value_vars=x.columns[4:10], var_name='stat')
-        plt.figure(figsize=(3, 5))
-        ax = sns.boxplot(data=melted, x='stat', y='value', notch=True, showfliers=False, width=0.5)
-        # sns.swarmplot(data=melted, x='stat', y='value', color='black')
-        # ax.set(xticklabels=['mean', 'random_mean','mean_diff', 'grouped', 'random_grouped', 'grouped_diff'])
-        plt.xticks(rotation=90)
-        plt.xlabel("")
-        plt.ylabel("Prediction MSE")
-        plt.tight_layout()
-        plt.show()
-        sys.exit()
 
     @staticmethod
     def moderate_lfc(df):
@@ -176,7 +148,7 @@ class DynamicDifferentialExpression(object):
 
         # For readability
 
-        models = df['index'].values.astype(int)
+        models = df['net'].values.astype(int)
         n = len(df)
         # if n < 1:
         #     return
@@ -249,7 +221,7 @@ class DynamicDifferentialExpression(object):
 
         return df
 
-    def predict(self, test, estimators=None, ctrl=None):
+    def predict(self, test, estimators=None, ctrl=None, baseline=False):
         """
         Calculate predictions from trained estimators
         :param test:
@@ -270,37 +242,35 @@ class DynamicDifferentialExpression(object):
 
         # Calculate estimator predictions
         prediction = estimators.apply(self._e_predict, contrast=contrast,
-                                      ctrl=ctrl)
+                                      with_base=baseline, ctrl=ctrl)
 
         return prediction
 
-    def score_prediction(self, c, prediction, f=None):
-        if f is None:
-            f = mse
-        true_data = self.dea.data.loc[prediction.index, c]
-        timeseries_mean = true_data.groupby(level='time', axis=1)
-        true_value = timeseries_mean.mean()
-        error = true_value.apply(lambda x: f(x, prediction.loc[x.name]), axis=1)
-
-        return error
-
-    def _e_predict(self, df, contrast, ctrl):
+    def _e_predict(self, df, contrast, with_base=False, ctrl=None):
         """
         Calculate the prediction for a new condition with a set of trained
         estimators. Meant to work with groubpy.apply()
         :param df:
+        :param contrast
         :param ctrl: the control condition
-        :param pred_lib:
+        :param with_base: Add in the baseline values
         :return:
         """
-        # Calculate the baseline
-        baseline = self.dea.data.loc[df.name, ctrl].groupby('time').mean()
 
         # Calculate the average log fold change prediction in the group
         sim_predictors = df['net'].astype(str)
         est_lfc = self.sim_dea.results[contrast].coefficients.loc[sim_predictors]
-        est_lfc.columns = baseline.index
-        pred = baseline + est_lfc
+        est_lfc.columns = self.times
+
+        pred = est_lfc
+
+        if with_base:
+            # Calculate the baseline
+            baseline = self.dea.data.loc[df.name, ctrl].groupby('time').mean()
+
+            pred = baseline + est_lfc
+
+        pred.index.name = 'net'
 
         return pred
 

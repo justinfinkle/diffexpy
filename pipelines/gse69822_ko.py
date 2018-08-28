@@ -61,7 +61,7 @@ def running_stat(x, N, s='median'):
 
 def plot_gene_prediction(gene, match, data, sim_der, col_names, ensembl_to_hgnc, ax=None):
     dep = DEPlot()
-    matching_sim = match.loc[match.true_gene==gene, 'index'].astype(str).values
+    matching_sim = match.loc[match.train_gene==gene, 'net'].astype(str).values
     pred_lfc = sim_der.coefficients.loc[matching_sim]
     baseline = data.loc[gene, 'wt'].groupby('time').mean().values
     random = sim_der.coefficients+baseline
@@ -205,6 +205,7 @@ def main():
     rna_seq = '../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt'
     compiled_sim = '../data/motif_library/gnw_networks/all_sim_compiled_for_gse69822.pkl'
     gene_names = '../data/GSE69822/mcf10a_gene_names.csv'
+    net_path = '../data/motif_library/gnw_networks/simulation_info.csv'
 
     e_condition = 'ko'  # The experimental condition used
     c_condition = 'wt'  # The control condition used
@@ -233,6 +234,8 @@ def main():
 
     # Remove unnecessary data
     basic_data = raw.loc[:, [e_condition, t_condition, c_condition]].copy()
+
+    net_data = pd.read_csv(net_path)
     """
         ===================================
         ============= Training ============
@@ -253,34 +256,31 @@ def main():
         ============= TESTING ==============
         ====================================
     """
-    predictions = dde.predict(t_condition, project_name)
+    # predictions = dde.predict(t_condition)
 
-
-    tr = dde.score(project_name, t_condition, c_condition, plot=False)
-
+    # Calculate testing scores
+    # ts = dde.score(t_condition, c_condition)
+    # ts.to_pickle('GSE69822/GSE69822_ko-wt_scoring.pkl')
+    ts = pd.read_pickle('GSE69822/GSE69822_ko-wt_scoring.pkl')
     """
         ====================================
         ============= PLOTTING =============
         ====================================
     """
 
-    # Add the LFC data in as a predictor
-    der = dde.dea.results['{}-{}'.format(e_condition, c_condition)]
-    tr['mean_abs_lfc'] = der.coefficients.loc[tr.index].abs().mean(axis=1)
-    tr['percent'] = tr.grouped_diff / tr.random_grouped_e * 100
-    unsorted = tr.copy()
-    tr.sort_values('mean_abs_lfc', ascending=False, inplace=True)
+    unsorted = ts.copy()
+    ts.sort_values('mean_abs_lfc', ascending=False, inplace=True)
 
     # Find predictor of
-    print(stats.spearmanr(tr.abs_dev, tr.grouped_diff))
-    sns.regplot(np.log2(tr.abs_dev), tr.grouped_diff)
+    print(stats.spearmanr(ts.abs_dev, ts.grouped_diff))
+    sns.regplot(np.log2(ts.abs_dev), ts.grouped_diff)
     plt.tight_layout()
     plt.savefig(
         "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/absdev_vs_diff.pdf",
         fmt='pdf')
     plt.close()
 
-    censored = tr[tr.group_dev < (3 * tr.group_dev.std())]
+    censored = ts[ts.group_dev < (3 * ts.group_dev.std())]
     n_top, top_val = elbow_criteria(range(len(censored)), censored.mean_abs_lfc)
     plt.plot(range(len(censored)), censored.mean_abs_lfc / censored.mean_abs_lfc.max(), label='sorted mean dev')
     plt.plot([n_top, n_top], [0, 1], 'k', label='cutoff')
@@ -300,11 +300,11 @@ def main():
     plt.plot(rm.T, c='0.5', zorder=0, alpha=0.1)
     plt.plot([0, 0], lw=2, c='0.5', label='random_sort', zorder=0)
     plt.plot(np.median(rm, axis=0), label='<random_sort>')
-    srm = running_stat(tr.percent.values, n_top, s='median')
-    plt.plot([0, len(tr)], [tr.percent.median(), tr.percent.median()], label='med(all models)')
-    plt.plot([0, len(tr)], [top.percent.median(), top.percent.median()], label='med(top models)')
+    srm = running_stat(ts.percent.values, n_top, s='median')
+    plt.plot([0, len(ts)], [ts.percent.median(), ts.percent.median()], label='med(all models)')
+    plt.plot([0, len(ts)], [top.percent.median(), top.percent.median()], label='med(top models)')
     plt.plot(srm, label='LFC sorted')
-    plt.plot([0, len(tr)], [0, 0], 'k-', lw=1)
+    plt.plot([0, len(ts)], [0, 0], 'k-', lw=1)
     plt.ylim(-100, 100)
     plt.plot(range(len(censored)), censored.mean_abs_lfc * 10, label='mean_abs_lfc')
     leg = plt.legend(loc='center left', bbox_to_anchor=([1, 0.5]))
@@ -321,17 +321,17 @@ def main():
     group_colors = ['0.5'] + Bold_8.mpl_colors[:1]
     color_dict = OrderedDict(zip(group_keys, group_colors))
 
-    print("All % median: {}, % Top median: {}".format(tr.percent.median(), top.percent.median()))
+    print("All % median: {}, % Top median: {}".format(ts.percent.median(), top.percent.median()))
     print()
-    print("All % wilcoxp: {}, % Top wilcoxp: {}".format(stats.wilcoxon(tr.percent).pvalue / 2,
+    print("All % wilcoxp: {}, % Top wilcoxp: {}".format(stats.wilcoxon(ts.percent).pvalue / 2,
                                                         stats.wilcoxon(top.percent).pvalue / 2))
     print()
-    print("All ∆ median: {}, ∆ Top median: {}".format(tr.grouped_diff.median(), top.grouped_diff.median()))
+    print("All ∆ median: {}, ∆ Top median: {}".format(ts.grouped_diff.median(), top.grouped_diff.median()))
     print()
-    print("All ∆ wilcoxp: {}, ∆ Top wilcoxp: {}".format(stats.wilcoxon(tr.grouped_diff).pvalue / 2,
+    print("All ∆ wilcoxp: {}, ∆ Top wilcoxp: {}".format(stats.wilcoxon(ts.grouped_diff).pvalue / 2,
                                                         stats.wilcoxon(top.grouped_diff).pvalue / 2))
 
-    ss = tr.sort_values('abs_dev', ascending=False)
+    ss = ts.sort_values('abs_dev', ascending=False)
 
     recall = np.cumsum(x > 0, axis=1) / np.sum(x > 0, axis=1)[0]
     precision = np.cumsum(x > 0, axis=1) / (np.arange(x.shape[1]) + 1)
@@ -350,9 +350,6 @@ def main():
     plt.close()
 
     # ### Network plots!
-
-    net_data = pd.read_csv('../data/motif_library/gnw_networks/simulation_info.csv')
-    net_data.head()
 
     plt.figure(figsize=(22, 10))
     gs = gridspec.GridSpec(1, 2, width_ratios=[3, 1], wspace=0.4)
@@ -374,7 +371,7 @@ def main():
     hidden_ax.axis('off')
     cbar_ax = plt.subplot(gs_left[1, 3])
 
-    box_data = [tr.percent, top.percent]
+    box_data = [ts.percent, top.percent]
     df = pd.concat(box_data, keys=color_dict.keys()).reset_index()
     df.columns = ['dataset', 'gene', 'value']
     df['metric'] = 'percent'
@@ -387,7 +384,7 @@ def main():
     box_ax.set_xlabel('')
     box_ax.legend().remove()
 
-    violin_data = [tr.grouped_diff, top.grouped_diff]
+    violin_data = [ts.grouped_diff, top.grouped_diff]
     violin_df = pd.concat(violin_data, keys=color_dict.keys()).reset_index()
     violin_df.columns = ['dataset', 'gene', 'value']
     violin_df['metric'] = 'difference'
@@ -445,7 +442,7 @@ def main():
     labels = ['G', 'x', 'y']
     logics = ['_multiplicative', '_linear', '']
     node_info = {}
-    models = net_data.loc[matches[matches.true_gene == gene]['index'].values]
+    models = net_data.loc[matches[matches.train_gene == gene]['net'].values]
     for node in labels:
         cur_dict = {}
         counts = Counter(models['{}_logic'.format(node)])
@@ -456,14 +453,14 @@ def main():
         node_info[node] = cur_dict
     plot_net(high_net_ax, node_info, models, labels)
 
-    gene = tr.sort_values('percent', ascending=False).index[0]
+    gene = ts.sort_values('percent', ascending=False).index[0]
     plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
                          ax=med_pred_ax)
 
     labels = ['G', 'x', 'y']
     logics = ['_multiplicative', '_linear', '']
     node_info = {}
-    models = net_data.loc[matches[matches.true_gene == gene]['index'].values]
+    models = net_data.loc[matches[matches.train_gene == gene]['net'].values]
     for node in labels:
         cur_dict = {}
         counts = Counter(models['{}_logic'.format(node)])
@@ -474,14 +471,14 @@ def main():
         node_info[node] = cur_dict
     plot_net(med_net_ax, node_info, models, labels)
 
-    gene = tr.sort_values('percent', ascending=False).index[30]
+    gene = ts.sort_values('percent', ascending=False).index[30]
     plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
                          ax=low_pred_ax)
     low_pred_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
     labels = ['G', 'x', 'y']
     logics = ['_multiplicative', '_linear', '']
     node_info = {}
-    models = net_data.loc[matches[matches.true_gene == gene]['index'].values]
+    models = net_data.loc[matches[matches.train_gene == gene]['net'].values]
     for node in labels:
         cur_dict = {}
         counts = Counter(models['{}_logic'.format(node)])
