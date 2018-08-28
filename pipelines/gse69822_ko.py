@@ -189,113 +189,56 @@ def load_sim_data(path, node='y', perturb: Union[int, tuple, None]=1):
     return sim_data
 
 
-def main():
-    """
-     ===================================
-     ====== Set script parameters ======
-     ===================================
-     """
-    # todo: argv and parsing
-
-    # Set globals
-    sns.set_palette(Bold_8.mpl_colors)
-    pd.set_option('display.width', 250)
-
-    # External files
-    rna_seq = '../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt'
-    compiled_sim = '../data/motif_library/gnw_networks/all_sim_compiled_for_gse69822.pkl'
-    gene_names = '../data/GSE69822/mcf10a_gene_names.csv'
-    net_path = '../data/motif_library/gnw_networks/simulation_info.csv'
-
-    e_condition = 'ko'  # The experimental condition used
-    c_condition = 'wt'  # The control condition used
-    t_condition = 'ki'  # The test condition
-
-    override = False  # Rerun certain parts of the analysis
-
-    """
-    ===================================
-    ========== Load the data ==========
-    ===================================
-    """
-
-    # NOTE: This process currently assumes some intermediate information is already saved
-    # Prep the raw data
-    project_name = "GSE69822"
-
-    # Features of the samples taken that are used in calculating statistics
-    sample_features = ['condition', 'replicate', 'time']
-
-    # Load sim data
-    sim_data = load_sim_data(compiled_sim)
-
-    raw = load_data(rna_seq, sample_features, bg_shift=False)
-    tx_to_gene = pd.read_csv(gene_names, index_col=0)
-
-    # Remove unnecessary data
-    basic_data = raw.loc[:, [e_condition, t_condition, c_condition]].copy()
-
-    net_data = pd.read_csv(net_path)
-    """
-        ===================================
-        ============= Training ============
-        ===================================
-    """
-    # dde = DDE(project_name)
-    # dde.train(project_name, basic_data, sim_data, exp=e_condition, override=override)
-    # # A lot went into the training. We should save the results
-    # dde.to_pickle()
-
-    dde = pd.read_pickle('GSE69822/GSE69822_ko-wt_dde.pkl') # type: DDE
-
-    matches = dde.match
-    sim_dea = dde.sim_dea
-
-    """
-        ====================================
-        ============= TESTING ==============
-        ====================================
-    """
-    # predictions = dde.predict(t_condition)
-
-    # Calculate testing scores
-    # ts = dde.score(t_condition, c_condition)
-    # ts.to_pickle('GSE69822/GSE69822_ko-wt_scoring.pkl')
-    ts = pd.read_pickle('GSE69822/GSE69822_ko-wt_scoring.pkl')
-    """
-        ====================================
-        ============= PLOTTING =============
-        ====================================
-    """
-
-    unsorted = ts.copy()
-    ts.sort_values('mean_abs_lfc', ascending=False, inplace=True)
-
-    # Find predictor of
-    print(stats.spearmanr(ts.abs_dev, ts.grouped_diff))
-    sns.regplot(np.log2(ts.abs_dev), ts.grouped_diff)
+def plot_error_predictor(x, y, out_path=None, ax=None):
+    print(stats.spearmanr(x, y))
+    with sns.axes_style("whitegrid"):
+        ax = sns.regplot(x, y, ax=ax)
+    ax.set_xlabel('log2(Mean KI-WT LFC)')
+    ax.set_ylabel('∆MSE')
     plt.tight_layout()
-    plt.savefig(
-        "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/absdev_vs_diff.pdf",
-        fmt='pdf')
-    plt.close()
+    if out_path:
+        plt.savefig(out_path, fmt='pdf')
+        plt.close()
+    else:
+        plt.show()
 
-    censored = ts[ts.group_dev < (3 * ts.group_dev.std())]
-    n_top, top_val = elbow_criteria(range(len(censored)), censored.mean_abs_lfc)
-    plt.plot(range(len(censored)), censored.mean_abs_lfc / censored.mean_abs_lfc.max(), label='sorted mean dev')
+
+def censor_values(df, col, thresh=3):
+    """
+
+    :param df:
+    :param col:
+    :param thresh: float; multiplier for the stddev
+    :return:
+    """
+    df = df[df[col] < (thresh*df[col].std())]
+    return df
+
+
+def calc_groups(df):
+    unsorted = df.copy()
+    df = df.sort_values('mean_abs_lfc', ascending=False)
+    censored = censor_values(df, 'group_dev')
+    n_top, _ = elbow_criteria(range(len(censored)), censored.mean_abs_lfc)
+    test_sort = df.sort_values('abs_dev', ascending=False)
+    return unsorted, df, censored, n_top, test_sort
+
+def plot_top_cut(df, n_top, out_path=None):
+
+    plt.plot(range(len(df)), df.mean_abs_lfc / df.mean_abs_lfc.max(), label='sorted mean dev')
     plt.plot([n_top, n_top], [0, 1], 'k', label='cutoff')
-    plt.plot([np.sum(censored.iloc[:ii].percent > 0) / ii for ii in range(len(censored))], '.', c='grey',
+    plt.plot([np.sum(df.iloc[:ii].percent > 0) / ii for ii in range(len(df))], '.', c='grey',
              label='fraction TP')
     plt.legend()
-    plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/sorting.pdf",
-                fmt='pdf')
-    plt.close()
+    if out_path:
+        plt.savefig(out_path, fmt='pdf')
+        plt.close()
+    else:
+        plt.show()
 
-    top = censored.iloc[:n_top]
-    n_shuff = 100
-    x = np.array([shuffle(unsorted.percent.values) for ii in range(n_shuff)])
-    stats.wilcoxon(censored.percent)
 
+def plot_running_stat(unsorted, censored, ts, top, n_shuff=100, out_path=None):
+    n_top = len(top)
     rm = np.array([running_stat(shuffle(unsorted.percent.values), n_top, s='median') for ii in range(n_shuff)])
     plt.plot(rm.T, c='0.5', zorder=0, alpha=0.1)
     plt.plot([0, 0], lw=2, c='0.5', label='random_sort', zorder=0)
@@ -307,16 +250,66 @@ def main():
     plt.plot([0, len(ts)], [0, 0], 'k-', lw=1)
     plt.ylim(-100, 100)
     plt.plot(range(len(censored)), censored.mean_abs_lfc * 10, label='mean_abs_lfc')
-    leg = plt.legend(loc='center left', bbox_to_anchor=([1, 0.5]))
     plt.xlim([0, len(srm) - 1])
     plt.tight_layout()
-    plt.savefig(
-        "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/running_stats.pdf",
-        fmt='pdf')
+    if out_path:
+        plt.savefig(out_path, fmt='pdf')
+        plt.close()
+    else:
+        plt.show()
+
+
+def calc_pr(x, axis=1):
+    """
+
+    :param x: matrix of 1s and 0s
+    :param axis:
+    :return:
+    """
+    # Calculate true positives as each new value is added
+    cum_tp = np.cumsum(x, axis=axis)
+
+    # Total number of true positives
+    total_tp = np.sum(x, axis=axis)[0]
+
+    # Total number of classifications made
+    n_samp = (np.arange(x.shape[1]) + 1)
+
+    # True positive rate
+    tpr = cum_tp/total_tp
+
+    # Precision
+    p = cum_tp/n_samp
+
+    return tpr, p
+
+
+def random_order(x, n_shuff=100):
+    shuffled = np.array([shuffle(x) for _ in range(n_shuff)])
+    return shuffled
+
+
+def pr_plot(unsorted, censored, ss):
+    shuffled = random_order(unsorted.percent.values)
+    correct_class = shuffled > 0
+    s_recall, s_precision = calc_pr(correct_class)
+    plt.plot(s_recall.T, s_precision.T, '0.5', alpha=0.5)
+    plt.plot(np.mean(s_recall, axis=0), np.mean(s_precision, axis=0), 'k')
+
+    recall = np.cumsum(censored.percent > 0) / np.sum(censored.percent > 0)
+    precision = np.cumsum(censored.percent > 0) / (np.arange(len(censored)) + 1)
+    print('KO LFC AUPR: ', integrate.cumtrapz(precision, recall)[-1])
+    plt.plot(recall, precision)
+
+    recall = np.cumsum(ss.percent > 0) / np.sum(ss.percent > 0)
+    precision = np.cumsum(ss.percent > 0) / (np.arange(len(ss)) + 1)
+    print('KI LFC AUPR: ', integrate.cumtrapz(precision, recall)[-1])
+    plt.plot(recall, precision)
     plt.close()
 
-    # ### Figure organization
 
+def panel_plot(ts, top, censored, unsorted, test_sort, matches, dde, tx_to_gene, sim_dea, net_data):
+    n_top = len(top)
     group_keys = ['full', 'top']
     group_colors = ['0.5'] + Bold_8.mpl_colors[:1]
     color_dict = OrderedDict(zip(group_keys, group_colors))
@@ -331,33 +324,15 @@ def main():
     print("All ∆ wilcoxp: {}, ∆ Top wilcoxp: {}".format(stats.wilcoxon(ts.grouped_diff).pvalue / 2,
                                                         stats.wilcoxon(top.grouped_diff).pvalue / 2))
 
-    ss = ts.sort_values('abs_dev', ascending=False)
-
-    recall = np.cumsum(x > 0, axis=1) / np.sum(x > 0, axis=1)[0]
-    precision = np.cumsum(x > 0, axis=1) / (np.arange(x.shape[1]) + 1)
-    plt.plot(recall.T, precision.T, '0.5', alpha=0.5)
-    plt.plot(np.mean(recall, axis=0), np.mean(precision, axis=0), 'k')
-
-    recall = np.cumsum(censored.percent > 0) / np.sum(censored.percent > 0)
-    precision = np.cumsum(censored.percent > 0) / (np.arange(len(censored)) + 1)
-    print('KO LFC AUPR: ', integrate.cumtrapz(precision, recall)[-1])
-    plt.plot(recall, precision)
-
-    recall = np.cumsum(ss.percent > 0) / np.sum(ss.percent > 0)
-    precision = np.cumsum(ss.percent > 0) / (np.arange(len(ss)) + 1)
-    print('KI LFC AUPR: ', integrate.cumtrapz(precision, recall)[-1])
-    plt.plot(recall, precision)
-    plt.close()
-
     # ### Network plots!
-
+    shuffled = random_order(unsorted.percent.values)
     plt.figure(figsize=(22, 10))
     gs = gridspec.GridSpec(1, 2, width_ratios=[3, 1], wspace=0.4)
     # Create a gridspec within the gridspec. 1 row and 2 columns, specifying width ratio
     gs_right = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[1], hspace=0.5)
 
     gs_left = gridspec.GridSpecFromSubplotSpec(2, 4, subplot_spec=gs[0],
-                                                hspace=0.5, width_ratios=[1, 1, 1, 0.1])
+                                               hspace=0.5, width_ratios=[1, 1, 1, 0.1])
     auroc_ax = plt.subplot(gs_right[0, 0])
     box_ax = plt.subplot(gs_right[1, 0])
 
@@ -413,10 +388,10 @@ def main():
 
     auroc_ax.plot(np.cumsum(censored.percent < 0) / np.sum(censored.percent < 0),
                   np.cumsum(censored.percent > 0) / np.sum(censored.percent > 0), label='sorted')
-    auroc_ax.plot(np.cumsum(ss.percent < 0) / np.sum(ss.percent < 0),
-                  np.cumsum(ss.percent > 0) / np.sum(ss.percent > 0), label='abs_dev')
-    auroc_ax.plot((np.cumsum(x < 0, axis=1) / np.sum(unsorted.percent < 0)).T,
-                  (np.cumsum(x > 0, axis=1) / np.sum(unsorted.percent > 0)).T, c='0.5', alpha=0.1)
+    auroc_ax.plot(np.cumsum(test_sort.percent < 0) / np.sum(test_sort.percent < 0),
+                  np.cumsum(test_sort.percent > 0) / np.sum(test_sort.percent > 0), label='abs_dev')
+    auroc_ax.plot((np.cumsum(shuffled < 0, axis=1) / np.sum(unsorted.percent < 0)).T,
+                  (np.cumsum(shuffled > 0, axis=1) / np.sum(unsorted.percent > 0)).T, c='0.5', alpha=0.1)
     auroc_ax.plot([0, 1], [0, 1], 'k', label='random')
 
     auroc_ax.plot([0, 0], [0, 0], lw=2, c='0.5', label='shuffled', zorder=0)
@@ -504,6 +479,112 @@ def main():
     plt.subplots_adjust(left=0.07, right=0.83, top=0.95)
     plt.show()
     # plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_5/5_model_predictions.pdf", fmt='pdf')
+
+
+def make_plots(dde, ts, net_data, sim_dea, matches, tx_to_gene):
+    # Get the groups necessary for plots
+    unsorted, ts, censored, n_top, test_sort = calc_groups(ts)
+    top = censored.iloc[:n_top]
+
+    # Plot relationship between KI-WT LFC deviation and prediction
+    fig_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/absdev_vs_diff.pdf"
+    plot_error_predictor(np.log2(ts.abs_dev), ts.grouped_diff, fig_path)
+
+    # Plot elbow rule
+    top_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/sorting.pdf"
+    plot_top_cut(censored, n_top, top_path)
+
+    # Plot the moving median
+    rs_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/running_stats.pdf"
+    plot_running_stat(unsorted, censored, ts, top, out_path=rs_path)
+
+    # Precision recall plot
+    pr_plot(unsorted, censored, test_sort)
+
+    # Plot the main paneled figure
+    panel_plot(ts, top, censored, unsorted, test_sort, matches, dde, tx_to_gene, sim_dea, net_data)
+
+
+def main():
+    """
+     ===================================
+     ====== Set script parameters ======
+     ===================================
+     """
+    # todo: argv and parsing
+
+    # Set globals
+    sns.set_palette(Bold_8.mpl_colors)
+    pd.set_option('display.width', 250)
+
+    # External files
+    rna_seq = '../data/GSE69822/GSE69822_RNA-Seq_Raw_Counts.txt'
+    compiled_sim = '../data/motif_library/gnw_networks/all_sim_compiled_for_gse69822.pkl'
+    gene_names = '../data/GSE69822/mcf10a_gene_names.csv'
+    net_path = '../data/motif_library/gnw_networks/simulation_info.csv'
+
+    e_condition = 'ko'  # The experimental condition used
+    c_condition = 'wt'  # The control condition used
+    t_condition = 'ki'  # The test condition
+
+    override = False  # Rerun certain parts of the analysis
+
+    """
+    ===================================
+    ========== Load the data ==========
+    ===================================
+    """
+
+    # NOTE: This process currently assumes some intermediate information is already saved
+    # Prep the raw data
+    project_name = "GSE69822"
+
+    # Features of the samples taken that are used in calculating statistics
+    sample_features = ['condition', 'replicate', 'time']
+
+    # Load sim data
+    sim_data = load_sim_data(compiled_sim)
+
+    raw = load_data(rna_seq, sample_features, bg_shift=False)
+    tx_to_gene = pd.read_csv(gene_names, index_col=0)
+
+    # Remove unnecessary data
+    basic_data = raw.loc[:, [e_condition, t_condition, c_condition]].copy()
+
+    net_data = pd.read_csv(net_path)
+    """
+        ===================================
+        ============= Training ============
+        ===================================
+    """
+    # dde = DDE(project_name)
+    # dde.train(project_name, basic_data, sim_data, exp=e_condition, override=override)
+    # # A lot went into the training. We should save the results
+    # dde.to_pickle()
+
+    dde = pd.read_pickle('GSE69822/GSE69822_ko-wt_dde.pkl') # type: DDE
+
+    matches = dde.match
+    sim_dea = dde.sim_dea
+
+    """
+        ====================================
+        ============= TESTING ==============
+        ====================================
+    """
+    # predictions = dde.predict(t_condition)
+
+    # Calculate testing scores
+    # ts = dde.score(t_condition, c_condition)
+    # ts.to_pickle('GSE69822/GSE69822_ko-wt_scoring.pkl')
+    ts = pd.read_pickle('GSE69822/GSE69822_ko-wt_scoring.pkl')
+
+    """
+        ====================================
+        ============= PLOTTING =============
+        ====================================
+    """
+    make_plots(dde, ts, net_data, sim_dea, matches, tx_to_gene)
 
 
 if __name__ == '__main__':

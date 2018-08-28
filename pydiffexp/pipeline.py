@@ -169,7 +169,7 @@ class DynamicDifferentialExpression(object):
         # p = self.moderate_lfc(pred_lfc.loc[models])
         grouped_error = err(test, grouped_prediction)
 
-        group_dev = grouped_prediction.abs().sum()
+        group_dev = grouped_prediction.abs().mean()
 
         # Calculate a predicted cluster
 
