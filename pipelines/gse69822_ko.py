@@ -216,12 +216,12 @@ def censor_values(df, col, thresh=3):
 
 
 def calc_groups(df):
-    unsorted = df.copy()
     df = df.sort_values('mean_abs_lfc', ascending=False)
     censored = censor_values(df, 'group_dev')
     n_top, _ = elbow_criteria(range(len(censored)), censored.mean_abs_lfc)
-    test_sort = df.sort_values('abs_dev', ascending=False)
-    return unsorted, df, censored, n_top, test_sort
+    test_sort = censored.sort_values('abs_dev', ascending=False)
+    return df, censored, n_top, test_sort
+
 
 def plot_top_cut(df, n_top, out_path=None):
 
@@ -266,22 +266,32 @@ def calc_pr(x, axis=1):
     :param axis:
     :return:
     """
-    # Calculate true positives as each new value is added
-    cum_tp = np.cumsum(x, axis=axis)
-
-    # Total number of true positives
-    total_tp = np.sum(x, axis=axis)[0]
 
     # Total number of classifications made
-    n_samp = (np.arange(x.shape[1]) + 1)
+    n_samp = (np.arange(x.shape[axis]) + 1)
+
+    if axis == 1:
+        x = x.T
+        axis = 0
+        n_samp = n_samp[:, None]
+    # Calculate true positives as each new value is added
+    cum_tp = np.cumsum(x, axis=axis)
+    cum_fp = np.cumsum(~x, axis=axis)
+
+    # Total number of true positives
+    total_tp = np.sum(x, axis=axis)
+    total_fp = np.sum(~x, axis=axis)
 
     # True positive rate
     tpr = cum_tp/total_tp
 
+    # False positive rate
+    fpr = cum_fp/total_fp
+
     # Precision
     p = cum_tp/n_samp
 
-    return tpr, p
+    return tpr, fpr, p
 
 
 def random_order(x, n_shuff=100):
@@ -292,50 +302,119 @@ def random_order(x, n_shuff=100):
 def pr_plot(unsorted, censored, ss):
     shuffled = random_order(unsorted.percent.values)
     correct_class = shuffled > 0
-    s_recall, s_precision = calc_pr(correct_class)
-    plt.plot(s_recall.T, s_precision.T, '0.5', alpha=0.5)
-    plt.plot(np.mean(s_recall, axis=0), np.mean(s_precision, axis=0), 'k')
+    s_recall, s_fpr, s_precision, = calc_pr(correct_class)
+    plt.plot(s_recall, s_precision, '0.5', alpha=0.5)
+    plt.plot(np.mean(s_recall, axis=1), np.mean(s_precision, axis=1), 'k')
 
-    recall = np.cumsum(censored.percent > 0) / np.sum(censored.percent > 0)
-    precision = np.cumsum(censored.percent > 0) / (np.arange(len(censored)) + 1)
-    print('KO LFC AUPR: ', integrate.cumtrapz(precision, recall)[-1])
-    plt.plot(recall, precision)
+    censored_correct = censored.percent > 0
+    c_recall, c_fpr, c_precision, = calc_pr(censored_correct, axis=0)
+    print('KO LFC AUPR: ', integrate.cumtrapz(c_precision, c_recall)[-1])
+    plt.plot(c_recall, c_precision)
 
-    recall = np.cumsum(ss.percent > 0) / np.sum(ss.percent > 0)
-    precision = np.cumsum(ss.percent > 0) / (np.arange(len(ss)) + 1)
-    print('KI LFC AUPR: ', integrate.cumtrapz(precision, recall)[-1])
-    plt.plot(recall, precision)
+    ss_correct = ss.percent > 0
+    ss_recall, ss_fpr, ss_precision, = calc_pr(ss_correct, axis=0)
+    print('KI LFC AUPR: ', integrate.cumtrapz(ss_precision, ss_recall)[-1])
+    plt.plot(ss_recall, ss_precision)
     plt.close()
 
 
-def panel_plot(ts, top, censored, unsorted, test_sort, matches, dde, tx_to_gene, sim_dea, net_data):
-    n_top = len(top)
+def center_axis(axes: plt.Axes, which='y'):
+    if which == 'y':
+        max_abs = np.max(np.abs(axes.get_ylim()))
+        axes.set_ylim(-max_abs, max_abs)
+    elif which == 'x':
+        max_abs = np.max(np.abs(axes.get_xlim()))
+        axes.set_xlim(-max_abs, max_abs)
+    elif which == 'both':
+        pass
+    return
+
+
+def box_plots(ts, top, spec):
     group_keys = ['full', 'top']
     group_colors = ['0.5'] + Bold_8.mpl_colors[:1]
     color_dict = OrderedDict(zip(group_keys, group_colors))
+    box_data = [ts.percent, top.percent]
+    df = pd.concat(box_data, keys=color_dict.keys()).reset_index()
+    df.columns = ['dataset', 'gene', 'value']
+    df['metric'] = 'percent'
 
-    print("All % median: {}, % Top median: {}".format(ts.percent.median(), top.percent.median()))
-    print()
-    print("All % wilcoxp: {}, % Top wilcoxp: {}".format(stats.wilcoxon(ts.percent).pvalue / 2,
-                                                        stats.wilcoxon(top.percent).pvalue / 2))
-    print()
-    print("All ∆ median: {}, ∆ Top median: {}".format(ts.grouped_diff.median(), top.grouped_diff.median()))
-    print()
-    print("All ∆ wilcoxp: {}, ∆ Top wilcoxp: {}".format(stats.wilcoxon(ts.grouped_diff).pvalue / 2,
-                                                        stats.wilcoxon(top.grouped_diff).pvalue / 2))
+    box_ax1 = plt.subplot(spec[1, 0])
+    box_ax2 = plt.subplot(spec[1, 1])
 
-    # ### Network plots!
-    shuffled = random_order(unsorted.percent.values)
-    plt.figure(figsize=(22, 10))
-    gs = gridspec.GridSpec(1, 2, width_ratios=[3, 1], wspace=0.4)
-    # Create a gridspec within the gridspec. 1 row and 2 columns, specifying width ratio
-    gs_right = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[1], hspace=0.5)
+    box_ax1 = sns.boxplot(data=df, x='metric', y='value', hue='dataset', showfliers=False, width=0.5, notch=True,
+                         medianprops=dict(solid_capstyle='butt', color='w'), palette=color_dict,
+                         boxprops=dict(linewidth=0), ax=box_ax1)
+    box_ax1.plot(box_ax1.get_xlim(), [0, 0], 'k-', zorder=0)
+    box_ax1.set_ylabel('∆MSE (%)')
+    box_ax1.set_xticklabels([])
+    box_ax1.set_xlabel('')
+    box_ax1.legend().remove()
+    center_axis(box_ax1)
 
-    gs_left = gridspec.GridSpecFromSubplotSpec(2, 4, subplot_spec=gs[0],
+    violin_data = [ts.grouped_diff, top.grouped_diff]
+    violin_df = pd.concat(violin_data, keys=color_dict.keys()).reset_index()
+    violin_df.columns = ['dataset', 'gene', 'value']
+    violin_df['metric'] = 'difference'
+    box_ax2 = sns.boxplot(data=violin_df, x='metric', y='value', hue='dataset', showfliers=False, width=0.5, notch=True,
+                         medianprops=dict(solid_capstyle='butt', color='w'), palette=color_dict,
+                         boxprops=dict(linewidth=0), ax=box_ax2)
+
+    box_ax2.plot(box_ax2.get_xlim(), [0, 0], 'k-', zorder=0)
+    box_ax2.yaxis.set_label_position('right')
+    box_ax2.yaxis.set_ticks_position('right')
+    box_ax2.set_ylabel('∆MSE', rotation=270, va='bottom')
+    box_ax2.set_xticklabels([])
+    box_ax2.set_xlabel('')
+    box_ax2.set_ylim(box_ax2.get_ylim())
+    box_ax2.legend(loc='upper center', ncol=2, bbox_to_anchor=[0, 0], frameon=False)
+    center_axis(box_ax2)
+
+    # Set the line widths just for the outer lines on the violinplots
+    lw = 0
+    from matplotlib.collections import PolyCollection
+
+    for art in box_ax2.get_children():
+        if isinstance(art, PolyCollection):
+            art.set_linewidth(lw)
+
+    return
+
+
+def auroc_plots(ax, censored, test_sort, n_top):
+    shuffled = random_order(censored.percent.values)
+    censored_correct = censored.percent > 0
+    test_correct = test_sort.percent > 0
+    shuffled_correct = shuffled > 0
+    c_tpr, c_fpr, _ = calc_pr(censored_correct, axis=0)
+    t_tpr, t_fpr, _ = calc_pr(test_correct, axis=0)
+    s_tpr, s_fpr, _ = calc_pr(shuffled_correct, axis=1)
+    ax.plot(c_fpr, c_tpr, label='Train LFC')
+    ax.plot(t_fpr, t_tpr, label='Test LFC')
+    ax.plot(s_fpr, s_tpr, c='0.5', alpha=0.1)
+    ax.plot([0, 1], [0, 1], 'k', label='random')
+    ax.plot([0, 0], [0, 0], lw=2, c='0.5', label='shuffled', zorder=0)
+    ax.set_ylim(0, 1)
+    ax.set_xlim(0, 1)
+    ax.set_yticks([0, 0.5, 1])
+    ax.set_xticks([0, 0.5, 1])
+    ax.set_ylabel('TPR')
+    ax.set_xlabel('FPR')
+    fpr_cut = (np.cumsum(censored.percent < 0) / np.sum(censored.percent < 0)).iloc[n_top]
+    ax.plot([fpr_cut, fpr_cut], [0, 1], label='top_cut')
+    leg = ax.legend(handlelength=1, loc='center left', bbox_to_anchor=(0.95, 0.5),
+                    handletextpad=0.2, frameon=False)
+
+    for line in leg.get_lines():
+        line.set_lw(4)
+        line.set_solid_capstyle('butt')
+
+    return
+
+
+def plot_genes(sub_spec, top, matches, dde, sim_dea, tx_to_gene, net_data, ts):
+    gs_left = gridspec.GridSpecFromSubplotSpec(2, 4, subplot_spec=sub_spec,
                                                hspace=0.5, width_ratios=[1, 1, 1, 0.1])
-    auroc_ax = plt.subplot(gs_right[0, 0])
-    box_ax = plt.subplot(gs_right[1, 0])
-
     high_pred_ax = plt.subplot(gs_left[0, 0])
     med_pred_ax = plt.subplot(gs_left[0, 1])
     low_pred_ax = plt.subplot(gs_left[0, 2])
@@ -345,69 +424,6 @@ def panel_plot(ts, top, censored, unsorted, test_sort, matches, dde, tx_to_gene,
     hidden_ax = plt.subplot(gs_left[0, 3])
     hidden_ax.axis('off')
     cbar_ax = plt.subplot(gs_left[1, 3])
-
-    box_data = [ts.percent, top.percent]
-    df = pd.concat(box_data, keys=color_dict.keys()).reset_index()
-    df.columns = ['dataset', 'gene', 'value']
-    df['metric'] = 'percent'
-
-    box_ax = sns.boxplot(data=df, x='metric', y='value', hue='dataset', showfliers=False, width=0.5, notch=True,
-                         medianprops=dict(solid_capstyle='butt', color='w'), palette=color_dict,
-                         boxprops=dict(linewidth=0), ax=box_ax)
-    box_ax.plot([-0.5, len(box_data) - 0.5], [0, 0], 'k-', zorder=0)
-    box_ax.set_ylabel('% improvement over random')
-    box_ax.set_xlabel('')
-    box_ax.legend().remove()
-
-    violin_data = [ts.grouped_diff, top.grouped_diff]
-    violin_df = pd.concat(violin_data, keys=color_dict.keys()).reset_index()
-    violin_df.columns = ['dataset', 'gene', 'value']
-    violin_df['metric'] = 'difference'
-    violin_ax = box_ax.twinx()
-    c = Bold_8.mpl_colors[2]
-    violin_ax = sns.violinplot(data=violin_df, x='metric', y='value', hue='dataset', palette=color_dict,
-                               ax=violin_ax, order=[1, 'difference'], inner='stick')
-    violin_ax.plot([-0.5, len(violin_data) - 0.5], [0, 0], color=c, zorder=0)
-    violin_ax.set_ylabel('improvement over random', color=c, rotation=270, va='bottom')
-    violin_ax.tick_params('y', colors=c)
-    violin_ax.legend(loc='upper center', ncol=2, bbox_to_anchor=[0.5, 1.2])
-
-    # Set the line widths just for the outer lines on the violinplots
-    lw = 0
-    from matplotlib.collections import PolyCollection
-
-    for art in violin_ax.get_children():
-        if isinstance(art, PolyCollection):
-            art.set_linewidth(lw)
-
-    box_ax.set_xticklabels(['%', '∆'])
-
-    """
-    AUROC
-    """
-
-    auroc_ax.plot(np.cumsum(censored.percent < 0) / np.sum(censored.percent < 0),
-                  np.cumsum(censored.percent > 0) / np.sum(censored.percent > 0), label='sorted')
-    auroc_ax.plot(np.cumsum(test_sort.percent < 0) / np.sum(test_sort.percent < 0),
-                  np.cumsum(test_sort.percent > 0) / np.sum(test_sort.percent > 0), label='abs_dev')
-    auroc_ax.plot((np.cumsum(shuffled < 0, axis=1) / np.sum(unsorted.percent < 0)).T,
-                  (np.cumsum(shuffled > 0, axis=1) / np.sum(unsorted.percent > 0)).T, c='0.5', alpha=0.1)
-    auroc_ax.plot([0, 1], [0, 1], 'k', label='random')
-
-    auroc_ax.plot([0, 0], [0, 0], lw=2, c='0.5', label='shuffled', zorder=0)
-    auroc_ax.set_ylim(0, 1)
-    auroc_ax.set_xlim(0, 1)
-    auroc_ax.set_yticks([0, 0.5, 1])
-    auroc_ax.set_xticks([0, 0.5, 1])
-    auroc_ax.set_ylabel('TPRish')
-    auroc_ax.set_xlabel('FPRish')
-    fpr_cut = (np.cumsum(censored.percent < 0) / np.sum(censored.percent < 0)).iloc[n_top]
-    auroc_ax.plot([fpr_cut, fpr_cut], [0, 1], label='top_cut')
-    leg = auroc_ax.legend(handlelength=1, loc='center left', bbox_to_anchor=(0.95, 0.5), handletextpad=0.2)
-
-    for line in leg.get_lines():
-        line.set_lw(4)
-        line.set_solid_capstyle('butt')
 
     gene = top.index[29]
     plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
@@ -449,7 +465,7 @@ def panel_plot(ts, top, censored, unsorted, test_sort, matches, dde, tx_to_gene,
     gene = ts.sort_values('percent', ascending=False).index[30]
     plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
                          ax=low_pred_ax)
-    low_pred_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    low_pred_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False)
     labels = ['G', 'x', 'y']
     logics = ['_multiplicative', '_linear', '']
     node_info = {}
@@ -464,7 +480,7 @@ def panel_plot(ts, top, censored, unsorted, test_sort, matches, dde, tx_to_gene,
         node_info[node] = cur_dict
     plot_net(low_net_ax, node_info, models, labels)
     leg = med_net_ax.legend(['×', '+', 'single input', 'no inputs'], ncol=4, loc='upper center',
-                            bbox_to_anchor=(0.5, 0.1), handletextpad=0.5, )
+                            bbox_to_anchor=(0.5, 0.1), handletextpad=0.5, frameon=False)
     leg.set_title("Node regulation", prop={'size': 24})
 
     # Add colorbar
@@ -475,34 +491,66 @@ def panel_plot(ts, top, censored, unsorted, test_sort, matches, dde, tx_to_gene,
     cb1.set_ticks([-1, 0, 1])
     cbar_ax.set_ylabel('Average edge sign')
 
-    plt.tight_layout()
-    plt.subplots_adjust(left=0.07, right=0.83, top=0.95)
+
+def panel_plot(ts, top, censored, test_sort, matches, dde, tx_to_gene, sim_dea, net_data):
+    n_top = len(top)
+
+    print("All % median: {}, % Top median: {}".format(ts.percent.median(), top.percent.median()))
+    print()
+    print("All % wilcoxp: {}, % Top wilcoxp: {}".format(stats.wilcoxon(ts.percent).pvalue / 2,
+                                                        stats.wilcoxon(top.percent).pvalue / 2))
+    print()
+    print("All ∆ median: {}, ∆ Top median: {}".format(ts.grouped_diff.median(), top.grouped_diff.median()))
+    print()
+    print("All ∆ wilcoxp: {}, ∆ Top wilcoxp: {}".format(stats.wilcoxon(ts.grouped_diff).pvalue / 2,
+                                                        stats.wilcoxon(top.grouped_diff).pvalue / 2))
+
+    plt.figure(figsize=(22, 10))
+    gs = gridspec.GridSpec(1, 2, width_ratios=[3, 1], wspace=0.4)
+    # Create a gridspec within the gridspec. 1 row and 2 columns, specifying width ratio
+    gs_right = gridspec.GridSpecFromSubplotSpec(2, 2, subplot_spec=gs[1], hspace=0.5)
+
+    auroc_ax = plt.subplot(gs_right[0, :])
+    box_spec = gs_right
+
+    # Make boxplots
+    box_plots(ts, top, box_spec)
+
+    # AUROC
+    auroc_plots(auroc_ax, censored, test_sort, n_top)
+
+    # Plot gene examples
+    plot_genes(gs[0], top, matches, dde, sim_dea, tx_to_gene, net_data, ts)
+
+    # Adjust axes
+    plt.subplots_adjust(left=0.07, right=0.89, top=0.95)
     plt.show()
     # plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_5/5_model_predictions.pdf", fmt='pdf')
 
 
 def make_plots(dde, ts, net_data, sim_dea, matches, tx_to_gene):
     # Get the groups necessary for plots
-    unsorted, ts, censored, n_top, test_sort = calc_groups(ts)
+    ts, censored, n_top, test_sort = calc_groups(ts)
+    ts, censored, n_top, test_sort = calc_groups(ts)
     top = censored.iloc[:n_top]
 
     # Plot relationship between KI-WT LFC deviation and prediction
     fig_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/absdev_vs_diff.pdf"
-    plot_error_predictor(np.log2(ts.abs_dev), ts.grouped_diff, fig_path)
+    # plot_error_predictor(np.log2(ts.abs_dev), ts.grouped_diff, fig_path)
 
     # Plot elbow rule
     top_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/sorting.pdf"
-    plot_top_cut(censored, n_top, top_path)
+    # plot_top_cut(censored, n_top, top_path)
 
     # Plot the moving median
     rs_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/running_stats.pdf"
-    plot_running_stat(unsorted, censored, ts, top, out_path=rs_path)
+    # plot_running_stat(unsorted, censored, ts, top, out_path=rs_path)
 
     # Precision recall plot
-    pr_plot(unsorted, censored, test_sort)
+    # pr_plot(unsorted, censored, test_sort)
 
     # Plot the main paneled figure
-    panel_plot(ts, top, censored, unsorted, test_sort, matches, dde, tx_to_gene, sim_dea, net_data)
+    panel_plot(ts, top, censored, test_sort, matches, dde, tx_to_gene, sim_dea, net_data)
 
 
 def main():
@@ -527,7 +575,7 @@ def main():
     c_condition = 'wt'  # The control condition used
     t_condition = 'ki'  # The test condition
 
-    override = False  # Rerun certain parts of the analysis
+    override = True  # Rerun certain parts of the analysis
 
     """
     ===================================
@@ -562,7 +610,7 @@ def main():
     # # A lot went into the training. We should save the results
     # dde.to_pickle()
 
-    dde = pd.read_pickle('GSE69822/GSE69822_ko-wt_dde.pkl') # type: DDE
+    dde = pd.read_pickle('GSE69822/GSE69822_{}-{}_dde.pkl'.format(e_condition, c_condition))    # type: DDE
 
     matches = dde.match
     sim_dea = dde.sim_dea
@@ -576,8 +624,8 @@ def main():
 
     # Calculate testing scores
     # ts = dde.score(t_condition, c_condition)
-    # ts.to_pickle('GSE69822/GSE69822_ko-wt_scoring.pkl')
-    ts = pd.read_pickle('GSE69822/GSE69822_ko-wt_scoring.pkl')
+    # ts.to_pickle('GSE69822/GSE69822_{}-{}_scoring.pkl'.format(e_condition, c_condition))
+    ts = pd.read_pickle('GSE69822/GSE69822_{}-{}_scoring.pkl'.format(e_condition, c_condition))
 
     """
         ====================================

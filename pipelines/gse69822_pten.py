@@ -360,7 +360,70 @@ def plot_collections(hm_data, hash_data, term_data, output='show'):
         plt.savefig(output, fmt='pdf')
 
 
-if __name__ == '__main__':
+def plot_sankey(gc, ar_der, dea, idx, ts_der, e, c_condition):
+    gs = gridspec.GridSpec(1, 3)
+
+
+    gs_left = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[0])
+    gs_mid = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[1])
+    gs_right = gridspec.GridSpecFromSubplotSpec(2, 4, subplot_spec=gs[0],
+                                               hspace=0.5, width_ratios=[1, 1, 1, 0.1])
+
+    f, ax_array = plt.subplots(2, len(e_condition), figsize=(4 * len(e_condition), 10))
+    if len(ax_array.shape) == 1:
+        ax_array = ax_array[:, np.newaxis]
+
+    dep = DEPlot()
+
+    seg_color = Prism_10.mpl_colors[5]
+    gene_class = 'DRG'
+    genes = gc[gene_class]
+    path_df = ar_der.discrete.loc[genes]
+    # path_df = path_df[(path_df!=0).any(axis=1)]
+    path_df.insert(0, 0, 0)
+    path_df = path_df[(path_df != 0).any(axis=1)]
+    path_df.columns = dea.times
+    print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
+    cur_ax = ax_array[0, idx]
+    cur_ax = dep.plot_flows(cur_ax, ['diff'], ['0.5'], [1], ['all'],
+                            x_coords=path_df.columns, min_sw=0.01, max_sw=1,
+                            uniform=True, path_df=path_df, node_width=None,
+                            legend=False, node_color=seg_color)
+    cur_ax.set_xticklabels('')
+    cur_ax.set_title("{} \nn={}".format(e.upper(), len(path_df)))
+    if idx == 0:
+        cur_ax.set_ylabel('Discrete \nFC')
+        cur_ax.set_yticks(range(-1, 2))
+    else:
+        cur_ax.set_yticks([])
+
+    ts_diff_signs = sign_diff(dea, ts_der, genes, e, c_condition)
+    # ts_diff_signs = ts_diff_signs[(ts_diff_signs!=0).any(axis=1)]
+    ts_path_df = np.cumsum(np.sign(ts_diff_signs), axis=1)
+    path_df = ts_path_df
+    path_df.insert(0, 0, 0)
+    path_df = path_df[(path_df != 0).any(axis=1)]
+    path_df.columns = dea.times
+    print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
+
+    cur_ax = ax_array[1, idx]
+    cur_ax = dep.plot_flows(cur_ax, ['diff'], ['0.5'], [1], ['all'],
+                            x_coords=path_df.columns, min_sw=0.01, max_sw=1,
+                            uniform=True, path_df=path_df, node_width=None,
+                            legend=False, node_color=seg_color)
+    # cur_ax.set_title("n={}".format(len(path_df)))
+    cur_ax.set_xticklabels(path_df.columns, rotation=90)
+    cur_ax.set_ylim([-4, 4])
+    # plt.xlabel('Time (min)')
+    cur_ax.set_title("n={}".format(len(path_df)))
+    if idx == 0:
+        cur_ax.set_ylabel('Cumulative Trajectory\nDifferences')
+        cur_ax.set_yticks(range(-4, 5))
+    else:
+        cur_ax.set_yticks([])
+
+
+def main():
     # Set globals
     sns.set_palette(Bold_8.mpl_colors)
     pd.set_option('display.width', 250)
@@ -403,16 +466,13 @@ if __name__ == '__main__':
     e_condition = ['pten']  # The experimental condition used
     c_condition = 'wt'  # The control condition used
 
-    f, ax_array = plt.subplots(2, len(e_condition), figsize=(4*len(e_condition), 10))
-    if len(ax_array.shape) == 1:
-        ax_array = ax_array[:, np.newaxis]
     # Remove unnecessary data
     for idx, e in enumerate(e_condition):
         basic_data = raw.loc[:, [e, c_condition]]
         contrast = "{}-{}".format(e, c_condition)
         dea_path = '{}/{}_{}_dea.pkl'.format(project_name, project_name, contrast)
 
-        dea = fit_dea(dea_path, data=basic_data, reference_labels=contrast_labels, index_names=sample_features, override=True)
+        dea = fit_dea(dea_path, data=basic_data, reference_labels=contrast_labels, index_names=sample_features)
         der, ar_der, ts_der, gc = get_gene_classes(dea, contrast)
 
         all_genes_tf, all_tf_dict = ft.convert_gene_to_tf(set(hgnc_to_ensembl.index), gene_dict)
@@ -461,70 +521,16 @@ if __name__ == '__main__':
             plot_collections(hm_data, hash_data, enriched)
 
         if sankey_plots:
-            dep = DEPlot()
+            plot_sankey(gc, ar_der, dea, idx, ts_der, e, c_condition)
 
-
-            # clusters = []
-            # for kk in range(ar_der.discrete.shape[1]-1):
-            #     c = ['1' if jj > kk else '0' for jj in range(ar_der.discrete.shape[1])]
-            #     clusters.append('({})'.format(', '.join(c)))
-            # print(clusters)
-            # Set the type of plot to display
-
-            seg_color = Prism_10.mpl_colors[5]
-            gene_class = 'DRG'
-            genes = gc[gene_class]
-            path_df = ar_der.discrete.loc[genes]
-            # path_df = path_df[(path_df!=0).any(axis=1)]
-            path_df.insert(0, 0, 0)
-            path_df = path_df[(path_df!=0).any(axis=1)]
-            path_df.columns = dea.times
-            print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
-            # fig = plt.figure(figsize=(10, 7.5))
-            # ax = fig.add_axes([0.1, 0.1, 0.6, 0.85])
-            cur_ax = ax_array[0, idx]
-            cur_ax = dep.plot_flows(cur_ax, ['diff'], ['0.5'], [1], ['all'],
-                                    x_coords=path_df.columns, min_sw=0.01, max_sw=1,
-                                    uniform=True, path_df=path_df, node_width=None,
-                                    legend=False, node_color=seg_color)
-            cur_ax.set_xticklabels('')
-            cur_ax.set_title("{} \nn={}".format(e.upper(), len(path_df)))
-            if idx == 0:
-                cur_ax.set_ylabel('Discrete \nFC')
-                cur_ax.set_yticks(range(-1, 2))
-            else:
-                cur_ax.set_yticks([])
-
-            ts_diff_signs = sign_diff(dea, ts_der, genes, e, c_condition)
-            # ts_diff_signs = ts_diff_signs[(ts_diff_signs!=0).any(axis=1)]
-            ts_path_df = np.cumsum(np.sign(ts_diff_signs), axis=1)
-            path_df = ts_path_df
-            path_df.insert(0, 0, 0)
-            path_df = path_df[(path_df != 0).any(axis=1)]
-            path_df.columns = dea.times
-            print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
-            # fig = plt.figure(figsize=(10, 7.5))
-            # ax = fig.add_axes([0.1, 0.1, 0.6, 0.85])
-            cur_ax = ax_array[1, idx]
-            cur_ax = dep.plot_flows(cur_ax, ['diff'], ['0.5'], [1], ['all'],
-                                    x_coords=path_df.columns, min_sw=0.01, max_sw=1,
-                                    uniform=True, path_df=path_df, node_width=None,
-                                    legend=False, node_color=seg_color)
-            # cur_ax.set_title("n={}".format(len(path_df)))
-            cur_ax.set_xticklabels(path_df.columns, rotation=90)
-            cur_ax.set_ylim([-4, 4])
-            # plt.xlabel('Time (min)')
-            cur_ax.set_title("n={}".format(len(path_df)))
-            if idx == 0:
-                cur_ax.set_ylabel('Cumulative Trajectory\nDifferences')
-                cur_ax.set_yticks(range(-4, 5))
-            else:
-                cur_ax.set_yticks([])
     plt.tight_layout()
     plt.show()
     # plt.savefig("{}/{}_{}_sankey_summary.pdf".format(project_name, project_name, gene_class),
     #             fmt='.pdf')
 
+
+if __name__ == '__main__':
+    main()
 
 
 

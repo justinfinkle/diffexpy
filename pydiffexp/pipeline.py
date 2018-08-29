@@ -119,7 +119,7 @@ class DynamicDifferentialExpression(object):
         test_stats = pd.concat([train_cluster, null_stats], axis=1).dropna()
 
         # Add known cluster info in
-        test_stats['ki_cluster'] = true_der.score_clustering().loc[test_stats.index, 'Cluster']
+        test_stats['{}_cluster'.format(exp)] = true_der.score_clustering().loc[test_stats.index, 'Cluster']
 
         # Add the LFC data in as a predictor
         train_der = self.dea.results[train_contrast]
