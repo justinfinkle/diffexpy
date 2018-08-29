@@ -10,7 +10,6 @@ import seaborn as sns
 from goatools import GOEnrichmentStudy
 from goatools.obo_parser import GODag
 from palettable.cartocolors.qualitative import Bold_8, Prism_10
-from pipeline import filter_dde
 from pydiffexp import DEAnalysis, DEPlot, DEResults
 from pydiffexp.utils import all_subsets
 from pydiffexp.utils import fisher_test as ft
@@ -141,7 +140,7 @@ def get_gene_classes(dea, contrast, p=0.05, strict_dde=True):
     ar_der = dea.results['({})_ar'.format(contrast)]    # type: DEResults
 
     deg = set(der.top_table(p=p).index)
-    dde = set(filter_dde(der.score_clustering()).index)
+    dde = set(der.get_dDegs().index)
     if strict_dde:
         dde = dde.intersection(deg)
 
@@ -399,7 +398,7 @@ if __name__ == '__main__':
         ============= Training ============
         ===================================
     """
-    collection_plots = True
+    collection_plots = False
     sankey_plots = True
     e_condition = ['pten']  # The experimental condition used
     c_condition = 'wt'  # The control condition used
@@ -413,7 +412,7 @@ if __name__ == '__main__':
         contrast = "{}-{}".format(e, c_condition)
         dea_path = '{}/{}_{}_dea.pkl'.format(project_name, project_name, contrast)
 
-        dea = fit_dea(dea_path, reference_labels=contrast_labels, index_names=sample_features)
+        dea = fit_dea(dea_path, data=basic_data, reference_labels=contrast_labels, index_names=sample_features, override=True)
         der, ar_der, ts_der, gc = get_gene_classes(dea, contrast)
 
         all_genes_tf, all_tf_dict = ft.convert_gene_to_tf(set(hgnc_to_ensembl.index), gene_dict)
@@ -522,8 +521,9 @@ if __name__ == '__main__':
             else:
                 cur_ax.set_yticks([])
     plt.tight_layout()
-    plt.savefig("{}/{}_{}_sankey_summary.pdf".format(project_name, project_name, gene_class),
-                fmt='.pdf')
+    plt.show()
+    # plt.savefig("{}/{}_{}_sankey_summary.pdf".format(project_name, project_name, gene_class),
+    #             fmt='.pdf')
 
 
 
