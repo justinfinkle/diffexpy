@@ -374,7 +374,7 @@ class DEPlot(object):
                     pass
         return flow_dict, array_min, array_max, norm
 
-    def plot_nodes(self, ax, flow_dict, node_width, x_coords, fc='k'):
+    def plot_nodes(self, ax, flow_dict, node_width, x_coords, fc='k', node_color_dict=None):
         """ Plots nodes of flow dictionary
 
         Arguments:
@@ -387,6 +387,8 @@ class DEPlot(object):
             Array of Polygon node objects
 
         """
+        if node_color_dict is None:
+            node_color_dict={}
         # X coordinates must be sorted otherswise nodes won't be assigned to the proper location
         x_coords = sorted(x_coords)
         n_times = len(x_coords)
@@ -411,6 +413,9 @@ class DEPlot(object):
                     nodes[(step + i, level)] = patches.Polygon(
                         self.make_node_points(x_coords[step + i]+x_offset, level + offset, h, node_width),
                         fc=fc, edgecolor='none')
+                    # todo: this is hacky, change it
+                    if (step+i, level) in node_color_dict.keys():
+                        nodes[(step + i, level)].set_color(node_color_dict[(step + i, level)])
                     ax.add_patch(nodes[(step + i, level)])
 
         return nodes
@@ -496,7 +501,8 @@ class DEPlot(object):
         # Set of four points, starting with lower left corner.
         return np.array([[x - w, y - h], [x + w, y - h], [x + w, y + h], [x - w, y + h]])
 
-    def plot_polys(self, ax, flow_dict, nodes, flow_color, flow_alpha, dir):
+    def plot_polys(self, ax, flow_dict, nodes, flow_color, flow_alpha, dir,
+                   seg_color_dict=None):
         """ Plots the path polygons
 
         Arguments:
@@ -516,6 +522,8 @@ class DEPlot(object):
 
         """
 
+        if seg_color_dict is None:
+            seg_color_dict = {}
         # Flow polygon parameters (first level, second level, left reference point, right reference point, width direction).
         poly_dict = {'up': (0, 1, 2, 0, 1), 'down': (1, 0, 1, 3, -1)}
         if type(flow_color) is list:
@@ -558,7 +566,11 @@ class DEPlot(object):
                         point_set[2] = zero
 
                     polys[(step, level)] = patches.Polygon(np.array(point_set))
-                    ax.add_patch(patches.PathPatch(self.make_curve_path(point_set), fc=display[flow[1]],
+                    if (step, level) in seg_color_dict:
+                        fc = seg_color_dict[(step, level)]
+                    else:
+                        fc = display[flow[1]]
+                    ax.add_patch(patches.PathPatch(self.make_curve_path(point_set), fc=fc,
                                                    alpha=flow_alpha, edgecolor='none'))
                 elif dir != 'over' and seg[poly_dict[dir][0]] < seg[poly_dict[dir][1]]:  # Plot up or down polygons
                     try:
@@ -576,7 +588,11 @@ class DEPlot(object):
 
                         # Save just the endpoints as a polygon to return, actual plot uses curves.
                         polys[(step, level)] = patches.Polygon(np.array(point_set))
-                        ax.add_patch(patches.PathPatch(self.make_curve_path(point_set), fc=display[flow[1]],
+                        if (step, level) in seg_color_dict:
+                            fc = seg_color_dict[(step, level)]
+                        else:
+                            fc = display[flow[1]]
+                        ax.add_patch(patches.PathPatch(self.make_curve_path(point_set), fc=fc,
                                                        alpha=flow_alpha, edgecolor='none'))
                     except:
                         pass
@@ -653,7 +669,8 @@ class DEPlot(object):
 
     def plot_flows(self, ax, sets, colors, alphas, paths, max_sw=1, min_sw=0.01,
                    node_width=None, node_color='k', x_coords=None, uniform=False,
-                   path_df=None, genes=None, norm=None, legend=True):
+                   path_df=None, genes=None, norm=None, legend=True, node_color_dict=None,
+                   seg_color_dict=None):
         """
         Plots a Sankey-like flow figure
 
@@ -677,7 +694,8 @@ class DEPlot(object):
             list of x coordinates for plot
         :return:
         """
-
+        if seg_color_dict is None:
+            seg_color_dict = {'up': None, 'down':None, 'over':None}
         # Set axes values
         # ax.set_axis_bgcolor('0.75')
         y_min, y_max = -1.1, 1.1
@@ -706,11 +724,15 @@ class DEPlot(object):
                                                                       norm=norm)  # create flow dictionary
             y_min, y_max = min(path_min - 0.1, y_min), max(path_max + 0.1, y_max)
             ax.set_ylim([y_min, y_max])
-            nodes = self.plot_nodes(ax, flow_dict, node_width, x_ticks, fc=node_color)  # plot nodes
+            nodes = self.plot_nodes(ax, flow_dict, node_width, x_ticks, fc=node_color,
+                                    node_color_dict=node_color_dict)  # plot nodes
             colors = colors[0]
-            self.up_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='up')  # plot up polygons
-            self.down_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='down')  # plot down polygons
-            self.horizontal_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='over')  # plot rectangles
+            self.up_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='up',
+                                              seg_color_dict=seg_color_dict['up'])  # plot up polygons
+            self.down_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='down',
+                                                seg_color_dict=seg_color_dict['down'])  # plot down polygons
+            self.horizontal_patches = self.plot_polys(ax, flow_dict, nodes, colors, 1, dir='over',
+                                                      seg_color_dict=seg_color_dict['over'])  # plot rectangles
 
             # Resize y axis if necessary
             y_min, y_max = min(path_min - 0.2, y_min), max(path_max + 0.2, y_max)

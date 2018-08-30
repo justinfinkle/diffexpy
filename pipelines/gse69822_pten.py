@@ -360,6 +360,14 @@ def plot_collections(hm_data, hash_data, term_data, output='show'):
     else:
         plt.savefig(output, fmt='pdf')
 
+def annotate_n(ax, n, **kwargs):
+    kwargs.setdefault('xy', (0, 0))
+    kwargs.setdefault('xytext', (0.01, 0.01))
+    kwargs.setdefault('textcoords', 'axes fraction')
+    kwargs.setdefault('fontsize', 24)
+    text = "n={}".format(n)
+    ax.annotate(text, **kwargs)
+    return
 
 def plot_sankey(gs, gc, ar_der, dea, e, ts_der, c_condition):
     # Initialize plotter
@@ -374,13 +382,15 @@ def plot_sankey(gs, gc, ar_der, dea, e, ts_der, c_condition):
     path_df.insert(0, 0, 0)
     path_df = path_df[(path_df != 0).any(axis=1)]
     path_df.columns = dea.times
+    # recolor selected node
+    node_color_dict = {(5, -1): Bold_8.mpl_colors[0]}
     print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
     cur_ax = dep.plot_flows(cur_ax, ['diff'], ['0.5'], [1], ['all'],
                             x_coords=path_df.columns, min_sw=0.01, max_sw=1,
                             uniform=True, path_df=path_df, node_width=None,
-                            legend=False, node_color=seg_color)
+                            legend=False, node_color=seg_color, node_color_dict=node_color_dict)
     cur_ax.set_xticklabels('')
-    cur_ax.set_title("n={}".format(len(path_df)))
+    annotate_n(cur_ax, len(path_df))
     cur_ax.set_ylabel('Discrete \nFC')
     cur_ax.set_yticks(range(-1, 2))
 
@@ -394,25 +404,30 @@ def plot_sankey(gs, gc, ar_der, dea, e, ts_der, c_condition):
     print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
 
     cur_ax = plt.subplot(gs[1, 0])
+    highlight = Bold_8.mpl_colors[0]
+    segs = [(3, -1), (3, 0), (3, 1), (3, 2), (4, -2), (4, -1), (4, 0), (4, 1)]
+    seg_color_dict = {'up': {s: highlight for s in segs},
+                      'down': None,
+                      'over': None}
     cur_ax = dep.plot_flows(cur_ax, ['diff'], ['0.5'], [1], ['all'],
                             x_coords=path_df.columns, min_sw=0.01, max_sw=1,
                             uniform=True, path_df=path_df, node_width=None,
-                            legend=False, node_color=seg_color)
-    # cur_ax.set_title("n={}".format(len(path_df)))
-    cur_ax.set_xticklabels(path_df.columns, rotation=90)
+                            legend=False, node_color=seg_color, seg_color_dict=seg_color_dict)
+
+    cur_ax.set_xticklabels(path_df.columns)
     cur_ax.set_ylim([-4, 4])
-    # plt.xlabel('Time (min)')
-    cur_ax.set_title("n={}".format(len(path_df)))
+    annotate_n(cur_ax, len(path_df))
+    plt.xlabel('Time (min)')
     cur_ax.set_ylabel('Cumulative Trajectory\nDifferences')
 
 
-def plot_lfc(dea, gene, ax, label=None):
+def plot_lfc(dea, gene, ax, **kwargs):
     der = dea.results['(pten-wt)_ar']
     ci = der.get_confint(der.coefficients.columns).loc[gene].groupby(level=0)
     ci_l = [0]+ci.get_group('L').values.tolist()
     ci_r = [0] + ci.get_group('R').values.tolist()
     mean_val = [0]+der.coefficients.loc[gene].values.tolist()
-    mean_line, = ax.plot(dea.times, mean_val, '-', marker='s')
+    mean_line, = ax.plot(dea.times, mean_val, '-', marker='s', **kwargs)
     mean_color = mean_line.get_color()
     ax.fill_between(dea.times, ci_l, ci_r, lw=0, alpha=0.2, color=mean_color)
     return
@@ -420,56 +435,33 @@ def plot_lfc(dea, gene, ax, label=None):
 
 def plot_bio_insight(gs, reg_dict, dea, ensembl_to_hgnc):
     # todo: figure out how to make this dynamic
-    # n_rows = len(reg_dict)
-    n_rows = 4
-    n_cols = 4
-    plot_idx = [[2, 3, 6, 7], [10, 11, 14, 15]]
-    bio_gs = gridspec.GridSpecFromSubplotSpec(n_rows, n_cols, subplot_spec=gs,
-                                              hspace=1, wspace=0.5)
-    dep = DEPlot()
-    sns.set_style('darkgrid')
+    bio_gs = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs)
+    sns.set_style('whitegrid')
     for ii, (reg, targets) in enumerate(reg_dict.items()):
-        top_left = [ii*2, 0]
-        reg_spec = bio_gs.new_subplotspec(top_left, int(n_rows/2), int(n_cols/2))
-        reg_ax = plt.subplot(reg_spec)
+        reg_ax = plt.subplot(bio_gs[ii])
         gene = ensembl_to_hgnc.loc[reg, 'hgnc_symbol']
-        if ii == 0:
-            dep.tsplot(dea.data.loc[reg], legend=False, ax=reg_ax)
-            reg_ax.set_xlabel('')
-        else:
-            plot_lfc(dea, reg, reg_ax, label=gene)
-            reg_ax.set_ylabel('LFC')
-        reg_ax.set_title(gene)
+        plot_lfc(dea, reg, reg_ax, label=gene, lw=3, ms=10)
+        reg_ax.set_ylabel(r'LFC$_t$-LFC$_0$')
 
         for jj, tar in enumerate(targets):
-            tar_ax = plt.subplot(bio_gs[plot_idx[ii][jj]])
             gene = ensembl_to_hgnc.loc[tar, 'hgnc_symbol']
-            if ii == 0:
-                dep.tsplot(dea.data.loc[tar], legend=False, ax=tar_ax)
-            else:
-                plot_lfc(dea, tar, reg_ax, label=gene)
-                reg_ax.legend()
-            tar_ax.set_title(gene)
-            tar_ax.set_ylabel('')
-            tar_ax.yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
-            if ii != 1:
-                tar_ax.set_xlabel('')
-            if jj <3:
-                tar_ax.set_xlabel('')
+            plot_lfc(dea, tar, reg_ax, label=gene, zorder=0)
+        if ii == 1:
+            reg_ax.set_xlabel('Time (min)')
+        reg_ax.yaxis.set_major_formatter(FormatStrFormatter('%0.1f'))
+        reg_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False)
 
-        # cur_gs = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=bio_gs)
-        # plot_reg_target(cur_gs, reg, targets, dea, ensembl_to_hgnc)
 
 def plot_panel(gc, ar_der, dea, ts_der, e, c_condition, reg_dict, ensembl_to_hgnc):
-    plt.figure(figsize=(22, 10))
-    gs = gridspec.GridSpec(1, 2, width_ratios=[1, 2], wspace=0.2)
+    plt.figure(figsize=(15, 10))
+    gs = gridspec.GridSpec(1, 3, width_ratios=[1, 1, 0.25])
 
     # Sankey space
     gs_sankey = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[0])
     plot_sankey(gs_sankey, gc, ar_der, dea, e, ts_der, c_condition)
 
     plot_bio_insight(gs[1], reg_dict, dea, ensembl_to_hgnc)
-    plt.subplots_adjust(left=0.07, right=0.97, top=0.95)
+    # plt.subplots_adjust(left=0.07, right=0.97, top=0.95)
     plt.tight_layout()
 
 
@@ -585,12 +577,6 @@ def main():
 
         reg_target_dict[tf] = tf_genes_to_plot
 
-        # match = der.score_clustering().loc[gc['DDE'].intersection(hgnc_to_ensembl.loc[
-        #                                                               [gene for gene in filtered_genes.values if
-        #                                                                gene in all_tf_dict[
-        #                                                                    'FOXA1']], 'ensembl_gene_id'].values)].sort_values('Cluster')
-        # match['avg'] = der.top_table().loc[match.index, 'AveExpr']
-
         if collection_plots:
             # Convert the ensembl symbols to hgnc for GO enrichment
             hgnc_set = OrderedDict([(k, set(ensembl_to_hgnc.loc[v, 'hgnc_symbol'].values))
@@ -609,11 +595,7 @@ def main():
 
         if sankey_plots:
             plot_panel(gc, ar_der, dea, ts_der, e, c_condition, reg_target_dict, ensembl_to_hgnc)
-
-    plt.tight_layout()
-    plt.show()
-    # plt.savefig("{}/{}_{}_sankey_summary.pdf".format(project_name, project_name, gene_class),
-    #             fmt='.pdf')
+            plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_4/4_DRG_pten_summary.pdf", fmt='pdf')
 
 
 if __name__ == '__main__':
