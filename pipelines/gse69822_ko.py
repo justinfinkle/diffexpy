@@ -59,7 +59,7 @@ def running_stat(x, N, s='median'):
     return rs
 
 
-def plot_gene_prediction(gene, match, data, sim_der, col_names, ensembl_to_hgnc, ax=None):
+def plot_gene_prediction(gene, match, data, sim_der, col_names, ensembl_to_hgnc, ax=None, **kwargs):
     dep = DEPlot()
     matching_sim = match.loc[match.train_gene==gene, 'net'].astype(str).values
     pred_lfc = sim_der.coefficients.loc[matching_sim]
@@ -81,7 +81,7 @@ def plot_gene_prediction(gene, match, data, sim_der, col_names, ensembl_to_hgnc,
     random = random.reorder_levels(true.index.names)
     ts_data = pd.concat([true, pred, random])
     ts_data.name = gene
-    ax = dep.tsplot(ts_data, scatter=False, ax=ax, legend=False)
+    ax = dep.tsplot(ts_data, scatter=False, ax=ax, legend=False, **kwargs)
     ax.set_title(ensembl_to_hgnc.loc[gene, 'hgnc_symbol'])
     ax.set_ylabel('')
 
@@ -96,14 +96,14 @@ def regular_points_on_circle(startangle=30, points=3, rad=1):
 
 def plot_net(ax, node_info, models, labels):
     pal = Earth_7.mpl_colormap
-    pie_centers = {labels[n]:point for n, point in enumerate(regular_points_on_circle())}
+    pie_centers = {labels[n]: point for n, point in enumerate(regular_points_on_circle())}
     pie_rad = 0.3
     pie_colors = [Prism_10.mpl_colors[idx] for idx in [3,5,7]]+['0.5']
 
     for node, center in pie_centers.items():
         ax.annotate(xy=center, s=node, color='w', ha='center', va='center', fontsize=20)
-        ax.pie(node_info[node]['fracs'], startangle=90, radius=pie_rad, center=center, colors=pie_colors)
-#         ax.legend(['*', '+', '1'])
+        ax.pie(node_info[node]['fracs'], startangle=90, radius=pie_rad,
+               center=center, colors=pie_colors, wedgeprops={'linewidth':0})
 
     center_lines = {}
     for combo in [('x', 'G'), ('G', 'y'), ('y', 'x')]:
@@ -141,7 +141,10 @@ def plot_net(ax, node_info, models, labels):
         out_s = ss-center_delta
         out_e = se-center_delta
 
-        astyle = ArrowStyle('simple', head_length=7, head_width=10, tail_width=7*edge_frac)
+        hw = 12
+        hl = 0.7*hw
+        tw = 0.7*hw*edge_frac
+        astyle = ArrowStyle('simple', head_length=hl, head_width=hw, tail_width=tw)
         fa = FancyArrowPatch(posA=out_s, posB=out_e, arrowstyle=astyle, lw=0, color=ec)
         ax.add_artist(fa)
 
@@ -160,7 +163,8 @@ def plot_net(ax, node_info, models, labels):
         in_s = se-center_delta
         in_e = ss-center_delta
 
-        astyle = ArrowStyle('simple', head_length=7, head_width=10, tail_width=7*edge_frac)
+        tw = 0.7 * hw * edge_frac
+        astyle = ArrowStyle('simple', head_length=hl, head_width=hw, tail_width=tw)
         fa = FancyArrowPatch(posA=in_s, posB=in_e, arrowstyle=astyle, lw=0, color=ec)
         ax.add_artist(fa)
 
@@ -412,84 +416,99 @@ def auroc_plots(ax, censored, test_sort, n_top):
     return
 
 
+def despine(ax, spines=('top', 'bottom', 'left', 'right')):
+    for spine in spines:
+        ax.spines[spine].set_visible(False)
+
+
+def detick(ax):
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
+
+
 def plot_genes(sub_spec, top, matches, dde, sim_dea, tx_to_gene, net_data, ts):
-    gs_left = gridspec.GridSpecFromSubplotSpec(2, 4, subplot_spec=sub_spec,
-                                               hspace=0.5, width_ratios=[1, 1, 1, 0.1])
-    high_pred_ax = plt.subplot(gs_left[0, 0])
-    med_pred_ax = plt.subplot(gs_left[0, 1])
-    low_pred_ax = plt.subplot(gs_left[0, 2])
-    high_net_ax = plt.subplot(gs_left[1, 0])
-    med_net_ax = plt.subplot(gs_left[1, 1])
-    low_net_ax = plt.subplot(gs_left[1, 2])
-    hidden_ax = plt.subplot(gs_left[0, 3])
-    hidden_ax.axis('off')
-    cbar_ax = plt.subplot(gs_left[1, 3])
+    # genes = [top.index[29],  ts.sort_values('percent', ascending=False).index[0],
+    #          ts.sort_values('percent', ascending=False).index[30]]
+    # genes = ts.index[np.random.randint(0, len(top), size=3)]
+    # genes = top.sort_values('grouped_e').index[:3]
 
-    gene = top.index[29]
-    plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
-                         ax=high_pred_ax)
-    high_pred_ax.set_ylabel('Expression')
+    genes = ['ENSG00000117289', 'ENSG00000213626', 'ENSG00000170044', 'ENSG00000272115']
+    w_ratios = [1]*len(genes)+[0.1, 0.1]
+    gs_left = gridspec.GridSpecFromSubplotSpec(3, len(genes)+2, subplot_spec=sub_spec,
+                                               hspace=0.75, wspace=0.5,
+                                               width_ratios=w_ratios)
 
-    labels = ['G', 'x', 'y']
-    logics = ['_multiplicative', '_linear', '']
-    node_info = {}
-    models = net_data.loc[matches[matches.train_gene == gene]['net'].values]
-    for node in labels:
-        cur_dict = {}
-        counts = Counter(models['{}_logic'.format(node)])
-        cur_dict['fracs'] = [counts['{}{}'.format(node, log)] for log in logics]
-        no_in = sum(models['{}_in'.format(node)] == 0)
-        cur_dict['fracs'][-1] -= no_in
-        cur_dict['fracs'].append(no_in)
-        node_info[node] = cur_dict
-    plot_net(high_net_ax, node_info, models, labels)
+    train_conditions = list(dde.training.values())
+    dep = DEPlot()
+    c_index = [6, 3, 1, 7, 9]
+    conditions = ['wt', 'ko', 'ki', 'predicted', 'random']
+    colors = {c: Prism_10.mpl_colors[idx] for c, idx in zip(conditions, c_index)}
+    for idx, gene in enumerate(genes):
+        train_ax = plt.subplot(gs_left[0, idx])
+        pred_ax = plt.subplot(gs_left[1, idx])
+        net_ax = plt.subplot(gs_left[2, idx])
 
-    gene = ts.sort_values('percent', ascending=False).index[0]
-    plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
-                         ax=med_pred_ax)
+        dep.tsplot(dde.dea.data.loc[gene, train_conditions], ax=train_ax, legend=False,
+                   no_fill_legend=True, color_dict=colors)
+        train_ax.set_title(tx_to_gene.loc[gene, 'hgnc_symbol'])
+        train_ax.set_ylabel('log2(counts)')
 
-    labels = ['G', 'x', 'y']
-    logics = ['_multiplicative', '_linear', '']
-    node_info = {}
-    models = net_data.loc[matches[matches.train_gene == gene]['net'].values]
-    for node in labels:
-        cur_dict = {}
-        counts = Counter(models['{}_logic'.format(node)])
-        cur_dict['fracs'] = [counts['{}{}'.format(node, log)] for log in logics]
-        no_in = sum(models['{}_in'.format(node)] == 0)
-        cur_dict['fracs'][-1] -= no_in
-        cur_dict['fracs'].append(no_in)
-        node_info[node] = cur_dict
-    plot_net(med_net_ax, node_info, models, labels)
+        plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
+                             ax=pred_ax, no_fill_legend=True, color_dict=colors)
+        pred_ax.set_ylabel('log2(counts)')
+        pred_ax.set_xlabel('')
+        pred_ax.set_title('')
 
-    gene = ts.sort_values('percent', ascending=False).index[30]
-    plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
-                         ax=low_pred_ax)
-    low_pred_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False)
-    labels = ['G', 'x', 'y']
-    logics = ['_multiplicative', '_linear', '']
-    node_info = {}
-    models = net_data.loc[matches[matches.train_gene == gene]['net'].values]
-    for node in labels:
-        cur_dict = {}
-        counts = Counter(models['{}_logic'.format(node)])
-        cur_dict['fracs'] = [counts['{}{}'.format(node, log)] for log in logics]
-        no_in = sum(models['{}_in'.format(node)] == 0)
-        cur_dict['fracs'][-1] -= no_in
-        cur_dict['fracs'].append(no_in)
-        node_info[node] = cur_dict
-    plot_net(low_net_ax, node_info, models, labels)
-    leg = med_net_ax.legend(['×', '+', 'single input', 'no inputs'], ncol=4, loc='upper center',
-                            bbox_to_anchor=(0.5, 0.1), handletextpad=0.5, frameon=False)
-    leg.set_title("Node regulation", prop={'size': 24})
+        if idx != 0:
+            train_ax.set_ylabel('')
+            pred_ax.set_ylabel('')
+
+        labels = ['G', 'x', 'y']
+        logics = ['_multiplicative', '_linear', '']
+        node_info = {}
+        models = net_data.loc[matches[matches.train_gene == gene]['net'].values]
+        for node in labels:
+            cur_dict = {}
+            counts = Counter(models['{}_logic'.format(node)])
+            cur_dict['fracs'] = [counts['{}{}'.format(node, log)] for log in logics]
+            no_in = sum(models['{}_in'.format(node)] == 0)
+            cur_dict['fracs'][-1] -= no_in
+            cur_dict['fracs'].append(no_in)
+            node_info[node] = cur_dict
+        plot_net(net_ax, node_info, models, labels)
+
+        # Add the net legend
+        if idx == np.median(range(len(genes))):
+            leg = net_ax.legend(['×', '+', 'single input', 'no inputs'], ncol=4, loc='upper center',
+                                bbox_to_anchor=(0.5, 0.1), handletextpad=0.5, frameon=False)
+            leg.set_title("Node regulation", prop={'size': 24})
+
+    # Add the legends
+    train_leg = train_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False)
+    pred_leg = pred_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False)
+    train_leg.set_title('Training', prop={'size': 24})
+    pred_leg.set_title('Testing', prop={'size': 24})
+
+    # Add arrow
+    arrow_ax = plt.subplot(gs_left[2, len(genes)])
+    despine(arrow_ax)
+    detick(arrow_ax)
+    astyle = ArrowStyle('wedge', tail_width=7, shrink_factor=0.5)
+    fa = FancyArrowPatch(posA=[0.5, 0], posB=[0.5, 1], arrowstyle=astyle, lw=0, color='k')
+    arrow_ax.add_artist(fa)
+    arrow_ax.set_ylabel('fraction of models \n edge exists')
+    arrow_ax.set_xlabel(100)
+    arrow_ax.set_title(0)
 
     # Add colorbar
     cmap = Earth_7.mpl_colormap
     norm = mpl.colors.Normalize(vmin=-1, vmax=1)
+
+    cbar_ax = plt.subplot(gs_left[2, len(genes)+1])
     cb1 = mpl.colorbar.ColorbarBase(cbar_ax, cmap=cmap,
                                     norm=norm)
     cb1.set_ticks([-1, 0, 1])
-    cbar_ax.set_ylabel('Average edge sign')
+    cbar_ax.set_ylabel('Average edge sign', rotation=270, va='bottom')
 
 
 def panel_plot(ts, top, censored, test_sort, matches, dde, tx_to_gene, sim_dea, net_data):
@@ -523,14 +542,13 @@ def panel_plot(ts, top, censored, test_sort, matches, dde, tx_to_gene, sim_dea, 
     plot_genes(gs[0], top, matches, dde, sim_dea, tx_to_gene, net_data, ts)
 
     # Adjust axes
-    plt.subplots_adjust(left=0.07, right=0.89, top=0.95)
-    plt.show()
-    # plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_5/5_model_predictions.pdf", fmt='pdf')
+    plt.subplots_adjust(left=0.055, right=0.89, top=0.95)
+    plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_5/5_model_predictions.pdf",
+                fmt='pdf')
 
 
 def make_plots(dde, ts, net_data, sim_dea, matches, tx_to_gene):
     # Get the groups necessary for plots
-    ts, censored, n_top, test_sort = calc_groups(ts)
     ts, censored, n_top, test_sort = calc_groups(ts)
     top = censored.iloc[:n_top]
 

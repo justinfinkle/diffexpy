@@ -5,12 +5,12 @@ from collections import Counter
 import matplotlib as mpl
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 import numpy as np
 import palettable.colorbrewer as cbrewer
 import pandas as pd
 import seaborn as sns
 from cycler import cycler
+from matplotlib.lines import Line2D
 from matplotlib.path import Path
 from pydiffexp import DEAnalysis
 from scipy import stats
@@ -255,7 +255,7 @@ class DEPlot(object):
             mean_line_dict = dict()
         if fill_dict is None:
             fill_dict = dict()
-        mean_defaults = dict(ls='-', marker='s', lw=2, mew=0, label=(name + " mean"), ms=10, zorder=0)
+        mean_defaults = dict(ls='-', marker='s', lw=2, mew=0, label=(name), ms=10, zorder=0)
         mean_kwargs = dict(mean_defaults, **mean_line_dict)
         mean_line, = ax.plot(grouped_stats[subgroup], grouped_stats['mean'], **mean_kwargs)
         mean_color = mean_line.get_color()
@@ -273,7 +273,8 @@ class DEPlot(object):
             ci_lines = self.confidence_interval_lines(grouped_stats['mean'], grouped_stats['se'], grouped_stats['tstat'])
             ax.fill_between(grouped_stats[subgroup], ci_lines[0], ci_lines[1], **fill_kwargs)
 
-    def tsplot(self, df, ax=None, legend=True, supergroup='condition', subgroup='time', **kwargs):
+    def tsplot(self, df, ax=None, legend=True, supergroup='condition', subgroup='time',
+               color_dict=None, **kwargs):
         gene = df.name
         supers = sorted(list(set(df.index.get_level_values(supergroup))))
         if not ax:
@@ -281,7 +282,13 @@ class DEPlot(object):
         ax.set_prop_cycle(cycler('color', _colors))
         for sup in supers:
             sup_data = df.loc[sup]
-            self.add_ts(ax, sup_data, sup, subgroup=subgroup, **kwargs)
+            mean_line_dict = dict()
+            try:
+                mean_line_dict['color'] = color_dict[sup]
+            except (TypeError, KeyError):
+                pass
+            self.add_ts(ax, sup_data, sup, subgroup=subgroup, mean_line_dict=mean_line_dict,
+                        **kwargs)
         # ax.set_xlim([np.min(grouped_stats[0]), np.max(grouped_stats[0])])\
         if legend:
             ax.legend(loc='best', numpoints=1)
