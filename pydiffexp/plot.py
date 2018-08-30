@@ -400,8 +400,16 @@ class DEPlot(object):
             for level in levels:
                 for i, h in self.calc_height(flow_dict, seg_dict, step, level, n_times).items():
                     offset = self.calc_offset(flow_dict, nodes, step + i, level, h)
+
+                    if step+i == 0:
+                        x_offset = node_width / 2
+                    elif step+i == n_times - 1:
+                        x_offset = -node_width / 2
+                    else:
+                        x_offset = 0
+
                     nodes[(step + i, level)] = patches.Polygon(
-                        self.make_node_points(x_coords[step + i], level + offset, h, node_width),
+                        self.make_node_points(x_coords[step + i]+x_offset, level + offset, h, node_width),
                         fc=fc, edgecolor='none')
                     ax.add_patch(nodes[(step + i, level)])
 
