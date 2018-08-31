@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.patches import FancyArrowPatch, ArrowStyle
+from matplotlib.ticker import FormatStrFormatter
 from matplotlib.transforms import Affine2D
 from palettable.cartocolors.diverging import Earth_7
 from palettable.cartocolors.qualitative import Bold_8, Prism_10
@@ -393,8 +394,8 @@ def auroc_plots(ax, censored, test_sort, n_top):
     c_tpr, c_fpr, _ = calc_pr(censored_correct, axis=0)
     t_tpr, t_fpr, _ = calc_pr(test_correct, axis=0)
     s_tpr, s_fpr, _ = calc_pr(shuffled_correct, axis=1)
-    ax.plot(c_fpr, c_tpr, label='Train LFC')
-    ax.plot(t_fpr, t_tpr, label='Test LFC')
+    ax.plot(c_fpr, c_tpr, label='train LFC')
+    ax.plot(t_fpr, t_tpr, label='test LFC')
     ax.plot(s_fpr, s_tpr, c='0.5', alpha=0.1)
     ax.plot([0, 1], [0, 1], 'k', label='random')
     ax.plot([0, 0], [0, 0], lw=2, c='0.5', label='shuffled', zorder=0)
@@ -405,7 +406,7 @@ def auroc_plots(ax, censored, test_sort, n_top):
     ax.set_ylabel('TPR')
     ax.set_xlabel('FPR')
     fpr_cut = (np.cumsum(censored.percent < 0) / np.sum(censored.percent < 0)).iloc[n_top]
-    ax.plot([fpr_cut, fpr_cut], [0, 1], label='top_cut')
+    ax.plot([fpr_cut, fpr_cut], [0, 1], label='top')
     leg = ax.legend(handlelength=1, loc='center left', bbox_to_anchor=(0.95, 0.5),
                     handletextpad=0.2, frameon=False)
 
@@ -439,30 +440,37 @@ def plot_genes(sub_spec, top, matches, dde, sim_dea, tx_to_gene, net_data, ts):
                                                width_ratios=w_ratios)
 
     train_conditions = list(dde.training.values())
+    # sns.set_style('whitegrid')
     dep = DEPlot()
     c_index = [6, 3, 1, 7, 9]
     conditions = ['wt', 'ko', 'ki', 'predicted', 'random']
     colors = {c: Prism_10.mpl_colors[idx] for c, idx in zip(conditions, c_index)}
     for idx, gene in enumerate(genes):
-        train_ax = plt.subplot(gs_left[0, idx])
-        pred_ax = plt.subplot(gs_left[1, idx])
+        with sns.axes_style("whitegrid"):
+            train_ax = plt.subplot(gs_left[0, idx])
+            pred_ax = plt.subplot(gs_left[1, idx])
+
+            dep.tsplot(dde.dea.data.loc[gene, train_conditions], ax=train_ax, legend=False,
+                       no_fill_legend=True, color_dict=colors)
+            train_ax.set_title(tx_to_gene.loc[gene, 'hgnc_symbol'])
+            train_ax.set_ylabel('log2(counts)')
+            train_ax.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))
+
+            plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
+                                 ax=pred_ax, no_fill_legend=True, color_dict=colors)
+            pred_ax.set_xlim(min(dde.times), max(dde.times))
+            pred_ax.set_xticks(dde.times)
+            pred_ax.set_xticklabels(dde.times, rotation=90)
+            pred_ax.set_ylabel('log2(counts)')
+            pred_ax.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))
+            pred_ax.set_xlabel('')
+            pred_ax.set_title('')
+
+            if idx != 0:
+                train_ax.set_ylabel('')
+                pred_ax.set_ylabel('')
+
         net_ax = plt.subplot(gs_left[2, idx])
-
-        dep.tsplot(dde.dea.data.loc[gene, train_conditions], ax=train_ax, legend=False,
-                   no_fill_legend=True, color_dict=colors)
-        train_ax.set_title(tx_to_gene.loc[gene, 'hgnc_symbol'])
-        train_ax.set_ylabel('log2(counts)')
-
-        plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
-                             ax=pred_ax, no_fill_legend=True, color_dict=colors)
-        pred_ax.set_ylabel('log2(counts)')
-        pred_ax.set_xlabel('')
-        pred_ax.set_title('')
-
-        if idx != 0:
-            train_ax.set_ylabel('')
-            pred_ax.set_ylabel('')
-
         labels = ['G', 'x', 'y']
         logics = ['_multiplicative', '_linear', '']
         node_info = {}
@@ -490,6 +498,7 @@ def plot_genes(sub_spec, top, matches, dde, sim_dea, tx_to_gene, net_data, ts):
     pred_leg.set_title('Testing', prop={'size': 24})
 
     # Add arrow
+    sns.set_style(None)
     arrow_ax = plt.subplot(gs_left[2, len(genes)])
     despine(arrow_ax)
     detick(arrow_ax)
@@ -525,7 +534,7 @@ def panel_plot(ts, top, censored, test_sort, matches, dde, tx_to_gene, sim_dea, 
                                                         stats.wilcoxon(top.grouped_diff).pvalue / 2))
 
     plt.figure(figsize=(22, 10))
-    gs = gridspec.GridSpec(1, 2, width_ratios=[3, 1], wspace=0.4)
+    gs = gridspec.GridSpec(1, 2, width_ratios=[3, 1])
     # Create a gridspec within the gridspec. 1 row and 2 columns, specifying width ratio
     gs_right = gridspec.GridSpecFromSubplotSpec(2, 2, subplot_spec=gs[1], hspace=0.5)
 
@@ -542,7 +551,8 @@ def panel_plot(ts, top, censored, test_sort, matches, dde, tx_to_gene, sim_dea, 
     plot_genes(gs[0], top, matches, dde, sim_dea, tx_to_gene, net_data, ts)
 
     # Adjust axes
-    plt.subplots_adjust(left=0.055, right=0.89, top=0.95)
+    # plt.subplots_adjust(left=0.055, right=0.89, top=0.95)
+    plt.tight_layout()
     plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_5/5_model_predictions.pdf",
                 fmt='pdf')
 
