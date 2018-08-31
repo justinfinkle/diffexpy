@@ -8,13 +8,14 @@ from typing import Dict
 
 import numpy as np
 import pandas as pd
-import r2py_helpers as rh
 import rpy2.robjects as robjects
 import rpy2.robjects.numpy2ri
 from natsort import natsorted
-from pydiffexp.utils import multiindex_helpers as mi
-from pydiffexp.utils.utils import int_or_float, grepl
 from rpy2.robjects.packages import importr
+
+from pydiffexp.utils import multiindex_helpers as mi
+from pydiffexp.utils import r2py as rh
+from pydiffexp.utils.utils import int_or_float, grepl
 
 # Activate conversion
 rpy2.robjects.numpy2ri.activate()

@@ -4,19 +4,20 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import r2py_helpers as rh
 import rpy2.robjects as robj
 import seaborn as sns
 from goatools import GOEnrichmentStudy
 from goatools.obo_parser import GODag
 from matplotlib.ticker import FormatStrFormatter
 from palettable.cartocolors.qualitative import Bold_8, Prism_10
+from rpy2.robjects.packages import importr
+from scipy import stats
+
 from pydiffexp import DEAnalysis, DEPlot, DEResults
 from pydiffexp.utils import all_subsets
 from pydiffexp.utils import fisher_test as ft
 from pydiffexp.utils import multiindex_helpers as mi
-from rpy2.robjects.packages import importr
-from scipy import stats
+from pydiffexp.utils import r2py as rh
 
 # Import discrete goodness of fit
 dgof = importr('dgof')

@@ -1,6 +1,5 @@
-import sys
-import pandas as pd
 import numpy as np
+import pandas as pd
 import rpy2.robjects as robj
 from rpy2.robjects import pandas2ri
 
@@ -79,6 +78,13 @@ def rvect_to_py(vector, force_list=False):
     # Strings
     elif isinstance(vector, robj.vectors.StrVector):
         x = np.array(vector).astype(str)
+
+    # Bools
+    elif isinstance(vector, robj.vectors.BoolVector):
+        x = np.array(vector).astype(bool)
+
+    else:
+        raise TypeError('R data type not recognized')
 
     # If it is an array with just one value, unpack that (e.g. Str, Int, and Float)
     if x is not None:
