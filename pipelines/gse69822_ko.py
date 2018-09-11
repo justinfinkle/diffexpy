@@ -11,7 +11,7 @@ import seaborn as sns
 from matplotlib.patches import FancyArrowPatch, ArrowStyle
 from matplotlib.ticker import FormatStrFormatter
 from matplotlib.transforms import Affine2D
-from palettable.cartocolors.diverging import Earth_7
+from matplotlib.colors import LinearSegmentedColormap
 from palettable.cartocolors.qualitative import Bold_8, Prism_10
 from pydiffexp import DEPlot
 from pydiffexp.pipeline import DynamicDifferentialExpression as DDE
@@ -19,6 +19,9 @@ from pydiffexp.plot import elbow_criteria
 from pydiffexp.utils import multiindex_helpers as mi
 from scipy import integrate, stats
 from sklearn.utils import shuffle
+
+# Set defaults
+mpl.rcParams['axes.labelweight'] = 'bold'
 
 
 def load_data(path, mi_level_names, bg_shift=True, **kwargs):
@@ -95,14 +98,15 @@ def regular_points_on_circle(startangle=30, points=3, rad=1):
     return np.vstack([x,y]).T
 
 
-def plot_net(ax, node_info, models, labels):
-    pal = Earth_7.mpl_colormap
+def plot_net(ax, node_info, models, labels, cmap, pie_colors):
+    pal = cmap
     pie_centers = {labels[n]: point for n, point in enumerate(regular_points_on_circle())}
     pie_rad = 0.3
-    pie_colors = [Prism_10.mpl_colors[idx] for idx in [3,5,7]]+['0.5']
+    # pie_colors = [Prism_10.mpl_colors[idx] for idx in [3, 5, 7]]+['0.5']
+    # pie_colors = [Tropic_7.mpl_colors[0], Tropic_7.mpl_colors[-1], '0.2', '0.7']
 
     for node, center in pie_centers.items():
-        ax.annotate(xy=center, s=node, color='w', ha='center', va='center', fontsize=20)
+        ax.annotate(xy=center, s=node, color='w', ha='center', va='center', fontsize=20, fontweight='bold')
         ax.pie(node_info[node]['fracs'], startangle=90, radius=pie_rad,
                center=center, colors=pie_colors, wedgeprops={'linewidth':0})
 
@@ -170,7 +174,7 @@ def plot_net(ax, node_info, models, labels):
         ax.add_artist(fa)
 
     ax.axis('equal')
-    ax.set_title("n = {}".format(len(models)))
+    ax.set_ylabel("n = {}".format(len(models)), rotation=0, va='top')
 
 
 def load_sim_data(path, node='y', perturb: Union[int, tuple, None]=1):
@@ -335,9 +339,9 @@ def center_axis(axes: plt.Axes, which='y'):
     return
 
 
-def box_plots(ts, top, spec):
+def box_plots(ts, top, spec, top_color):
     group_keys = ['full', 'top']
-    group_colors = ['0.5'] + Bold_8.mpl_colors[:1]
+    group_colors = ['0.5'] + [top_color]
     color_dict = OrderedDict(zip(group_keys, group_colors))
     box_data = [ts.percent, top.percent]
     df = pd.concat(box_data, keys=color_dict.keys()).reset_index()
@@ -348,7 +352,7 @@ def box_plots(ts, top, spec):
     box_ax2 = plt.subplot(spec[1, 1])
 
     box_ax1 = sns.boxplot(data=df, x='metric', y='value', hue='dataset', showfliers=False, width=0.5, notch=True,
-                         medianprops=dict(solid_capstyle='butt', color='w'), palette=color_dict,
+                         medianprops=dict(solid_capstyle='butt', color='k', lw=2), palette=color_dict,
                          boxprops=dict(linewidth=0), ax=box_ax1)
     box_ax1.plot(box_ax1.get_xlim(), [0, 0], 'k-', zorder=0)
     box_ax1.set_ylabel('∆MSE (%)')
@@ -362,7 +366,7 @@ def box_plots(ts, top, spec):
     violin_df.columns = ['dataset', 'gene', 'value']
     violin_df['metric'] = 'difference'
     box_ax2 = sns.boxplot(data=violin_df, x='metric', y='value', hue='dataset', showfliers=False, width=0.5, notch=True,
-                         medianprops=dict(solid_capstyle='butt', color='w'), palette=color_dict,
+                         medianprops=dict(solid_capstyle='butt', color='k', lw=2), palette=color_dict,
                          boxprops=dict(linewidth=0), ax=box_ax2)
 
     box_ax2.plot(box_ax2.get_xlim(), [0, 0], 'k-', zorder=0)
@@ -372,7 +376,10 @@ def box_plots(ts, top, spec):
     box_ax2.set_xticklabels([])
     box_ax2.set_xlabel('')
     box_ax2.set_ylim(box_ax2.get_ylim())
-    box_ax2.legend(loc='upper center', ncol=2, bbox_to_anchor=[0, 0], frameon=False)
+    leg = box_ax2.legend(loc='upper center', ncol=2, bbox_to_anchor=[0, 0.05], frameon=False, handlelength=1.5,
+                   handletextpad=0.5, handleheight=0.5)
+    for patch in leg.get_patches():
+        patch.set_linewidth(0)
     center_axis(box_ax2)
 
     # Set the line widths just for the outer lines on the violinplots
@@ -394,27 +401,39 @@ def auroc_plots(ax, censored, test_sort, n_top):
     c_tpr, c_fpr, _ = calc_pr(censored_correct, axis=0)
     t_tpr, t_fpr, _ = calc_pr(test_correct, axis=0)
     s_tpr, s_fpr, _ = calc_pr(shuffled_correct, axis=1)
-    ax.plot(c_fpr, c_tpr, label='train LFC')
-    ax.plot(t_fpr, t_tpr, label='test LFC')
+
+    # Plot shuffles
     ax.plot(s_fpr, s_tpr, c='0.5', alpha=0.1)
-    ax.plot([0, 1], [0, 1], 'k', label='random')
-    ax.plot([0, 0], [0, 0], lw=2, c='0.5', label='shuffled', zorder=0)
+    ax.plot([0, 0], [0, 0], lw=2, c='0.5', label='Shuffled')
+
+    # Random line
+    ax.plot([0, 1], [0, 1], 'k')
+
+    # Auroc lines
+    ax.plot(c_fpr, c_tpr, lw=3, label='Train LFC', color=Prism_10.mpl_colors[1])
+    ax.plot(t_fpr, t_tpr, lw=3, label='Test LFC', color=Prism_10.mpl_colors[-4])
+
+    # Top line
+    fpr_cut = (np.cumsum(censored.percent < 0) / np.sum(censored.percent < 0)).iloc[n_top]
+    top_line, = ax.plot([fpr_cut, fpr_cut], [0, 1], '--', lw=3, color=Prism_10.mpl_colors[-2])
+
     ax.set_ylim(0, 1)
     ax.set_xlim(0, 1)
     ax.set_yticks([0, 0.5, 1])
     ax.set_xticks([0, 0.5, 1])
-    ax.set_ylabel('TPR')
-    ax.set_xlabel('FPR')
-    fpr_cut = (np.cumsum(censored.percent < 0) / np.sum(censored.percent < 0)).iloc[n_top]
-    ax.plot([fpr_cut, fpr_cut], [0, 1], label='top')
-    leg = ax.legend(handlelength=1, loc='center left', bbox_to_anchor=(0.95, 0.5),
+    tpr = sum(censored_correct)/len(censored)
+    fpr = 1-tpr
+    ax.set_ylabel('Normalized TPR ({:.2f})'.format(tpr))
+    ax.set_xlabel('Normalized FPR ({:.2f})'.format(fpr))
+
+    leg = ax.legend(handlelength=1, loc='center left', bbox_to_anchor=(0.97, 0.5),
                     handletextpad=0.2, frameon=False)
 
     for line in leg.get_lines():
         line.set_lw(4)
         line.set_solid_capstyle('butt')
 
-    return
+    return top_line.get_color()
 
 
 def despine(ax, spines=('top', 'bottom', 'left', 'right')):
@@ -427,50 +446,78 @@ def detick(ax):
     ax.set_yticklabels([])
 
 
-def plot_genes(sub_spec, top, matches, dde, sim_dea, tx_to_gene, net_data, ts):
+def stars(p):
+    if p < 0.0001:
+        s = "****"
+    elif p < 0.001:
+        s = "***"
+    elif p < 0.01:
+        s = "**"
+    elif p < 0.05:
+        s = "*"
+    else:
+        s = ""
+    return s
+
+def plot_genes(sub_spec, leg_spec, net_spec, matches, dde, sim_dea, tx_to_gene, net_data, ts):
     # genes = [top.index[29],  ts.sort_values('percent', ascending=False).index[0],
     #          ts.sort_values('percent', ascending=False).index[30]]
     # genes = ts.index[np.random.randint(0, len(top), size=3)]
     # genes = top.sort_values('grouped_e').index[:3]
-
-    genes = ['ENSG00000117289', 'ENSG00000213626', 'ENSG00000170044', 'ENSG00000272115']
+    genes = ['ENSG00000117289', 'ENSG00000213626', 'ENSG00000170044']
     w_ratios = [1]*len(genes)+[0.1, 0.1]
-    gs_left = gridspec.GridSpecFromSubplotSpec(3, len(genes)+2, subplot_spec=sub_spec,
-                                               hspace=0.75, wspace=0.5,
-                                               width_ratios=w_ratios)
+    cols = len(genes)+2
+    gs_top = gridspec.GridSpecFromSubplotSpec(2, cols, subplot_spec=sub_spec,
+                                              width_ratios=w_ratios, wspace=0.5)
+
+    gs_bottom = gridspec.GridSpecFromSubplotSpec(1, 4, subplot_spec=leg_spec,
+                                                 width_ratios=[1, 1, 0.1, 0.1],
+                                                 wspace=0.5)
+    gs_mid = gridspec.GridSpecFromSubplotSpec(1, cols, subplot_spec=net_spec,
+                                              width_ratios=w_ratios, wspace=0.5)
 
     train_conditions = list(dde.training.values())
-    # sns.set_style('whitegrid')
     dep = DEPlot()
-    c_index = [6, 3, 1, 7, 9]
+    greys = ['0.1', '0.7', '0.4', '0.1', '0.7']
     conditions = ['wt', 'ko', 'ki', 'predicted', 'random']
-    colors = {c: Prism_10.mpl_colors[idx] for c, idx in zip(conditions, c_index)}
+    colors = {c: idx for c, idx in zip(conditions, greys)}
+    # colors['random'] = '0.7'
+    three_col = ['#AA0000', '#BBBBBB', '#0000AA']
+    new_map = LinearSegmentedColormap.from_list('custom', three_col)
+    edge_cmap = new_map
+    pie_colors = ['#0F8554', '#E17C05', '0.2', '0.7']
+    train_markers = ['o', '^']
+    test_markers = ['d', 'X', 's']
+    plot_times = dde.times.copy()
+    plot_times.remove(15)
     for idx, gene in enumerate(genes):
         with sns.axes_style("whitegrid"):
-            train_ax = plt.subplot(gs_left[0, idx])
-            pred_ax = plt.subplot(gs_left[1, idx])
-
+            train_ax = plt.subplot(gs_top[0, idx])
+            pred_ax = plt.subplot(gs_top[1, idx])
             dep.tsplot(dde.dea.data.loc[gene, train_conditions], ax=train_ax, legend=False,
-                       no_fill_legend=True, color_dict=colors)
+                       no_fill_legend=True, color_dict=colors, scatter=False, markers=train_markers)
             train_ax.set_title(tx_to_gene.loc[gene, 'hgnc_symbol'])
             train_ax.set_ylabel('log2(counts)')
             train_ax.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))
+            train_ax.set_xlabel('')
+            train_ax.set_xlim(min(plot_times), max(plot_times))
+            train_ax.set_xticks(plot_times)
+            train_ax.set_xticklabels([])
 
             plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
-                                 ax=pred_ax, no_fill_legend=True, color_dict=colors)
-            pred_ax.set_xlim(min(dde.times), max(dde.times))
-            pred_ax.set_xticks(dde.times)
-            pred_ax.set_xticklabels(dde.times, rotation=90)
+                                 ax=pred_ax, no_fill_legend=True, color_dict=colors, markers=test_markers)
+            pred_ax.set_xlim(min(plot_times), max(plot_times))
+            pred_ax.set_xticks(plot_times)
+            pred_ax.set_xticklabels(plot_times, rotation=90)
             pred_ax.set_ylabel('log2(counts)')
             pred_ax.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))
-            pred_ax.set_xlabel('')
             pred_ax.set_title('')
 
             if idx != 0:
                 train_ax.set_ylabel('')
                 pred_ax.set_ylabel('')
 
-        net_ax = plt.subplot(gs_left[2, idx])
+        net_ax = plt.subplot(gs_mid[0, idx])
         labels = ['G', 'x', 'y']
         logics = ['_multiplicative', '_linear', '']
         node_info = {}
@@ -483,76 +530,102 @@ def plot_genes(sub_spec, top, matches, dde, sim_dea, tx_to_gene, net_data, ts):
             cur_dict['fracs'][-1] -= no_in
             cur_dict['fracs'].append(no_in)
             node_info[node] = cur_dict
-        plot_net(net_ax, node_info, models, labels)
+        plot_net(net_ax, node_info, models, labels, edge_cmap, pie_colors)
 
         # Add the net legend
-        if idx == np.median(range(len(genes))):
-            leg = net_ax.legend(['×', '+', 'single input', 'no inputs'], ncol=4, loc='upper center',
-                                bbox_to_anchor=(0.5, 0.1), handletextpad=0.5, frameon=False)
+        if idx == len(genes)-1:
+            leg = net_ax.legend(['AND', 'OR', 'Single input', 'No input'], loc='center left',
+                                bbox_to_anchor=(1, 0.5), handletextpad=0.5, frameon=False,
+                                handlelength=1)
             leg.set_title("Node regulation", prop={'size': 24})
 
     # Add the legends
-    train_leg = train_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False)
-    pred_leg = pred_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False)
-    train_leg.set_title('Training', prop={'size': 24})
-    pred_leg.set_title('Testing', prop={'size': 24})
+    labels = {'wt': 'Wildtype', 'ko': 'PI3K KO', 'ki': 'PI3K KI'}
+    for line in train_ax.get_lines()+pred_ax.get_lines():
+        label = line.get_label()
+        try:
+            new = labels[label]
+        except KeyError:
+            new = label.capitalize()
+        line.set_label(new)
+
+    train_leg = train_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False,
+                                handlelength=1)
+    pred_leg = pred_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False,
+                              handlelength=1)
+
+    train_leg.set_title('Training', prop={'size': 28, 'weight': 'bold'})
+    pred_leg.set_title('Testing', prop={'size': 28, 'weight': 'bold'})
 
     # Add arrow
     sns.set_style(None)
-    arrow_ax = plt.subplot(gs_left[2, len(genes)])
+    arrow_ax = plt.subplot(gs_bottom[0])
     despine(arrow_ax)
     detick(arrow_ax)
-    astyle = ArrowStyle('wedge', tail_width=7, shrink_factor=0.5)
-    fa = FancyArrowPatch(posA=[0.5, 0], posB=[0.5, 1], arrowstyle=astyle, lw=0, color='k')
+
+    # Scale arrow width
+    fig = arrow_ax.get_figure()
+    bbox = arrow_ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+    width, height = bbox.width, bbox.height
+    height *= fig.dpi/2
+    astyle = ArrowStyle('wedge', tail_width=height, shrink_factor=0.5)
+    fa = FancyArrowPatch(posA=[0, 0.5], posB=[1, 0.5], arrowstyle=astyle, lw=0, color='k')
     arrow_ax.add_artist(fa)
-    arrow_ax.set_ylabel('fraction of models \n edge exists')
-    arrow_ax.set_xlabel(100)
-    arrow_ax.set_title(0)
+    arrow_ax.set_title('fraction of models \n edge exists')
+    arrow_ax.set_xticks([0, 1])
+    arrow_ax.set_xticklabels(['100%', '0%'])
 
     # Add colorbar
-    cmap = Earth_7.mpl_colormap
     norm = mpl.colors.Normalize(vmin=-1, vmax=1)
 
-    cbar_ax = plt.subplot(gs_left[2, len(genes)+1])
-    cb1 = mpl.colorbar.ColorbarBase(cbar_ax, cmap=cmap,
-                                    norm=norm)
+    cbar_ax = plt.subplot(gs_bottom[1])
+    cb1 = mpl.colorbar.ColorbarBase(cbar_ax, cmap=edge_cmap,
+                                    norm=norm, orientation='horizontal')
     cb1.set_ticks([-1, 0, 1])
-    cbar_ax.set_ylabel('Average edge sign', rotation=270, va='bottom')
+    cbar_ax.set_title('Average edge sign')
 
 
 def panel_plot(ts, top, censored, test_sort, matches, dde, tx_to_gene, sim_dea, net_data):
     n_top = len(top)
-
+    ts_percent_p = stats.wilcoxon(ts.percent).pvalue / 2
+    top_percent_p = stats.wilcoxon(top.percent).pvalue / 2
+    ts_delta_p = stats.wilcoxon(ts.grouped_diff).pvalue / 2
+    top_delta_p = stats.wilcoxon(top.grouped_diff).pvalue / 2
     print("All % median: {}, % Top median: {}".format(ts.percent.median(), top.percent.median()))
     print()
-    print("All % wilcoxp: {}, % Top wilcoxp: {}".format(stats.wilcoxon(ts.percent).pvalue / 2,
-                                                        stats.wilcoxon(top.percent).pvalue / 2))
+    print("All % wilcoxp: {}, % Top wilcoxp: {}".format(ts_percent_p,
+                                                        top_percent_p))
     print()
     print("All ∆ median: {}, ∆ Top median: {}".format(ts.grouped_diff.median(), top.grouped_diff.median()))
     print()
-    print("All ∆ wilcoxp: {}, ∆ Top wilcoxp: {}".format(stats.wilcoxon(ts.grouped_diff).pvalue / 2,
-                                                        stats.wilcoxon(top.grouped_diff).pvalue / 2))
+    print("All ∆ wilcoxp: {}, ∆ Top wilcoxp: {}".format(ts_delta_p, top_delta_p))
 
     plt.figure(figsize=(22, 10))
-    gs = gridspec.GridSpec(1, 2, width_ratios=[3, 1])
+    gs = gridspec.GridSpec(3, 2, width_ratios=[2, 1], height_ratios=[1, 0.5, 0.1],
+                           wspace=0.3, hspace=0.6)
+
     # Create a gridspec within the gridspec. 1 row and 2 columns, specifying width ratio
-    gs_right = gridspec.GridSpecFromSubplotSpec(2, 2, subplot_spec=gs[1], hspace=0.5)
+    gs_right = gridspec.GridSpecFromSubplotSpec(2, 2, subplot_spec=gs[:, 1], hspace=0.3)
 
     auroc_ax = plt.subplot(gs_right[0, :])
     box_spec = gs_right
 
-    # Make boxplots
-    box_plots(ts, top, box_spec)
-
     # AUROC
-    auroc_plots(auroc_ax, censored, test_sort, n_top)
+    top_color = auroc_plots(auroc_ax, censored, test_sort, n_top)
+
+    # Make boxplots
+    box_plots(ts, top, box_spec, top_color)
 
     # Plot gene examples
-    plot_genes(gs[0], top, matches, dde, sim_dea, tx_to_gene, net_data, ts)
+    left_top = gs[0, 0]
+    left_mid = gs[1, 0]
+    left_bottom = gs[2, 0]
+    plot_genes(left_top, left_bottom, left_mid, matches, dde, sim_dea, tx_to_gene, net_data, ts)
 
     # Adjust axes
-    # plt.subplots_adjust(left=0.055, right=0.89, top=0.95)
-    plt.tight_layout()
+    plt.subplots_adjust(left=0.055, right=0.90, top=0.95, bottom=0.05)
+    # plt.tight_layout(w_pad=10)
+    # plt.show()
     plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_5/5_model_predictions.pdf",
                 fmt='pdf')
 
