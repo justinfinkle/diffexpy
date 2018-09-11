@@ -12,8 +12,9 @@ import seaborn as sns
 from cycler import cycler
 from matplotlib.lines import Line2D
 from matplotlib.path import Path
-from pydiffexp import DEAnalysis
 from scipy import stats
+
+from pydiffexp import DEAnalysis
 
 sns.set_style("white")
 
@@ -255,7 +256,7 @@ class DEPlot(object):
             mean_line_dict = dict()
         if fill_dict is None:
             fill_dict = dict()
-        mean_defaults = dict(ls='-', marker='s', lw=2, mew=0, label=(name), ms=10, zorder=0)
+        mean_defaults = dict(ls='-', marker='s', lw=2, mew=0, label=(name), ms=10)
         mean_kwargs = dict(mean_defaults, **mean_line_dict)
         mean_line, = ax.plot(grouped_stats[subgroup], grouped_stats['mean'], **mean_kwargs)
         mean_color = mean_line.get_color()
@@ -268,26 +269,35 @@ class DEPlot(object):
                 fill_label = ''
             else:
                 fill_label = (name + (' {:d}%CI'.format(int(ci * 100))))
-            fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.2, label=fill_label)
+            fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.1, label=fill_label)
             fill_kwargs = dict(fill_defaults, **fill_dict)
             ci_lines = self.confidence_interval_lines(grouped_stats['mean'], grouped_stats['se'], grouped_stats['tstat'])
             ax.fill_between(grouped_stats[subgroup], ci_lines[0], ci_lines[1], **fill_kwargs)
 
     def tsplot(self, df, ax=None, legend=True, supergroup='condition', subgroup='time',
-               color_dict=None, **kwargs):
+               color_dict=None, markers=None, ls=None, **kwargs):
+        if markers is None:
+            markers = ['o']
+        if ls is None:
+            ls = ['-']
+        markers = itertools.cycle(markers)
+        ls = itertools.cycle(ls)
         gene = df.name
         supers = sorted(list(set(df.index.get_level_values(supergroup))))
         if not ax:
-            fig, ax = plt.subplots(figsize=(8,6))
+            fig, ax = plt.subplots(figsize=(8, 6))
         ax.set_prop_cycle(cycler('color', _colors))
         for sup in supers:
             sup_data = df.loc[sup]
-            mean_line_dict = dict()
+            kwargs.setdefault('mean_line_dict', dict())
             try:
-                mean_line_dict['color'] = color_dict[sup]
+                mean_line_props = {'color': color_dict[sup],
+                                   'marker': next(markers),
+                                   'ls': next(ls)}
+                kwargs['mean_line_dict'].update(mean_line_props)
             except (TypeError, KeyError):
                 pass
-            self.add_ts(ax, sup_data, sup, subgroup=subgroup, mean_line_dict=mean_line_dict,
+            self.add_ts(ax, sup_data, sup, subgroup=subgroup,
                         **kwargs)
         # ax.set_xlim([np.min(grouped_stats[0]), np.max(grouped_stats[0])])\
         if legend:
