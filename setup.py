@@ -9,6 +9,7 @@ setup(
     author_email='jfinkle@u.northwestern.edu',
     description='Dynamic Differential Expression Analysis in Python',
     install_requires=[
+        'scipy',
         'rpy2',
         'numpy',
         'pandas',

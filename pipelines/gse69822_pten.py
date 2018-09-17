@@ -534,7 +534,7 @@ def main():
 
     # tf_to_gene_dict = ft.tf_to_gene_dict(gene_to_tf_dict.keys(), gene_to_tf_dict)
     # pd.to_pickle(tf_to_gene_dict, 'GSE69822/GSE69822_tf_to_gene_dict.pkl')
-    tf_to_gene_dict = pd.read_pickle('GSE69822/GSE69822_tf_to_gene_dict.pkl')
+    # tf_to_gene_dict = pd.read_pickle('GSE69822/GSE69822_tf_to_gene_dict.pkl')
 
     # Remove unnecessary data
     for idx, e in enumerate(e_condition):
@@ -543,20 +543,27 @@ def main():
         dea_path = '{}/{}_{}_dea.pkl'.format(project_name, project_name, contrast)
 
         dea = fit_dea(dea_path, data=basic_data, reference_labels=contrast_labels, index_names=sample_features)
+
         der, ar_der, ts_der, gc = get_gene_classes(dea, contrast)
         # Group sizes
         sizes, collect = all_subsets([gc['DRG'], gc['DEG'], gc['dDEG']], ['DRG', 'DEG', 'dDEG'])
         print(sizes)
 
         # DRG Enrichment
-        drg_genes = ensembl_to_hgnc.loc[gc['DRG'], 'hgnc_symbol']
-        filtered_tf, drg_tf_dict = ft.convert_gene_to_tf(drg_genes, gene_to_tf_dict)
-        enrich = ft.calculate_study_enrichment(len(drg_genes), drg_tf_dict, len(dea.data), all_tf_dict)
+        dea_genes = ensembl_to_hgnc.loc[dea.data.index, 'hgnc_symbol'].values
+        er = ft.Enricher(gene_to_tf_dict, dea_genes)
+
+        drg_genes = ensembl_to_hgnc.loc[gc['DRG'], 'hgnc_symbol'].values
+        enrich = er.study_enrichment(drg_genes)
+        drg_tf_dict = ft.tf_to_gene_dict(drg_genes, gene_to_tf_dict)
+        # filtered_tf, drg_tf_dict = ft.convert_gene_to_tf(drg_genes, gene_to_tf_dict)
+        enrich = ft.calculate_study_enrichment(len(drg_genes), drg_tf_dict, len(dea_genes), dea_tf_dict)
         print(enrich.head())
 
-        filtered_genes = ensembl_to_hgnc.loc[ar_der.discrete[ar_der.discrete.iloc[:, -1] == -1].index, 'hgnc_symbol']
-        filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_to_tf_dict)
-        enrich = ft.calculate_study_enrichment(len(filtered_genes), filtered_tf_dict, len(dea.data), all_tf_dict)
+        filtered_genes = ensembl_to_hgnc.loc[ar_der.discrete[ar_der.discrete.iloc[:, -1] == 1].index, 'hgnc_symbol']
+        f_tf_dict = ft.tf_to_gene_dict(filtered_genes.values, gene_to_tf_dict)
+        # filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_to_tf_dict)
+        enrich = ft.calculate_study_enrichment(len(filtered_genes), f_tf_dict, len(dea_genes), dea_tf_dict)
         print(enrich.head())
 
         reg_target_dict = OrderedDict()

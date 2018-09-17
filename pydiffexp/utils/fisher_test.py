@@ -117,6 +117,7 @@ def calculate_study_enrichment(study_count, study_assoc_dict, bg_count, bg_assoc
     # Make results table
     results_table = pd.DataFrame(np.vstack((p_values, corrected_p)).T, columns=['p_uncorrected', 'p_bonferroni'])
     results_table.insert(0, 'TF', study_term_set)
+    results_table.set_index('TF', inplace=True)
     results_table.sort_values('p_uncorrected', inplace=True)
 
     #FDR correcton
@@ -159,14 +160,13 @@ def make_contingency_table(x, study_dict, bg_dict, study_count, bg_count):
     """
     # Initialize table
     study_set = set(study_dict[x])
-    not_selected = bg_count-study_count
-    bg_set = set(bg_dict[x]).difference(study_set)
+    bg_set = set(bg_dict[x])
 
     contingency_table = np.zeros((2, 2))
     selected_with_property = len(study_set)
     selected_without_property = study_count - selected_with_property
     not_selected_with_property = len(bg_set)
-    not_selected_without_property = not_selected-not_selected_with_property
+    not_selected_without_property = bg_count-not_selected_with_property
 
     # count_in_background = max(0, background_list.count(x)-match_in_study)
     contingency_table[0, 0] = selected_with_property
@@ -174,3 +174,56 @@ def make_contingency_table(x, study_dict, bg_dict, study_count, bg_count):
     contingency_table[1, 0] = not_selected_with_property
     contingency_table[1, 1] = not_selected_without_property
     return contingency_table
+
+
+class Enricher(object):
+    """
+
+    """
+    def __init__(self, gene_tf_dict, background=None):
+        # Gene to TF dictionary
+        self._gtt = gene_tf_dict
+
+        # Initialize background
+        self._bg = None
+        self._bg_genes = {}             # type: set
+        if background is None:
+            background = self.gtt.keys()
+        self.bg_genes = background
+
+    @property
+    def gtt(self):
+        return self._gtt
+
+    @gtt.setter
+    def gtt(self, value: dict):
+        self._gtt = value
+
+    @property
+    def bg_genes(self):
+        return self._bg_genes
+
+    @bg_genes.setter
+    def bg_genes(self, genes):
+        self._bg_genes = set(genes)
+
+    @property
+    def bg(self):
+        return self._bg
+
+    @bg.setter
+    def bg(self, genes):
+        self._bg = tf_to_gene_dict(genes, self.gtt)
+
+    def study_enrichment(self, study_genes, fdr=0.05):
+        # Exclude background
+        bg_genes = self.bg_genes.difference(study_genes)
+        bg = tf_to_gene_dict(bg_genes, self.gtt)
+
+        # Make a TF dictionary
+        study_dict = tf_to_gene_dict(study_genes, self.gtt)
+        study_count = len(study_genes)
+        enrich = calculate_study_enrichment(study_count, study_dict, len(bg_genes), bg, fdr=fdr)
+        return enrich
+
+
