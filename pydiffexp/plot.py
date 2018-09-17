@@ -221,16 +221,18 @@ class DEPlot(object):
         return ax
 
     @staticmethod
-    def tsstats(gene, data, groupby, ci, group=None):
+    def grouped_tstat(df, ci=0.83):
+        return stats.t.ppf(1 - (1 - ci) / 2, df=len(df) - 1)
+
+    def tsstats(self, gene, data, groupby, ci, group=None):
         grouped = data.groupby(groupby)
         group = group if group is not None else 'group'
         # Get plotting statistics. Rows are: group, mean, SE, and Tstat
         #todo: Use groupby more appropriately to get stats
-        grouped_stats = np.array(
-            [[g, np.mean(data[gene]), stats.sem(data[gene]), stats.t.ppf(1 - (1 - ci) / 2, df=len(data) - 1)]
-             for g, data in grouped]).T
-        grouped_df = pd.DataFrame(grouped_stats, index=[group, 'mean', 'se', 'tstat']).T
-        return grouped_df
+        g_stats = grouped.agg(['mean', 'median', 'sem'])
+        g_stats.columns = g_stats.columns.droplevel()
+        g_stats['tstat'] = grouped.apply(self.grouped_tstat, ci)
+        return g_stats
 
     @staticmethod
     def confidence_interval_lines(mean, se, tstat):
@@ -246,8 +248,29 @@ class DEPlot(object):
         lower = mean - se * tstat
         return upper, lower
 
+    def _ci_median_bottom(self, df, ci):
+        tstat = self.grouped_tstat(df, ci)
+        n = len(df)
+        idx = max(0, int(round(n/2-tstat*np.sqrt(n)/2)))
+        bottom = df.sort_values(df.columns[-1]).iloc[idx].loc[df.columns[-1]]
+        return bottom
+
+    def _ci_median_top(self, df, ci):
+        tstat = self.grouped_tstat(df, ci)
+        n = len(df)
+        idx = min(int(round(1+n/2+tstat*np.sqrt(n)/2)), n-1)
+        top = df.sort_values(df.columns[-1]).iloc[idx].loc[df.columns[-1]]
+        return top
+
+    def ci_median(self, df, group, ci):
+        grouped = df.groupby(group)
+        top = grouped.apply(self._ci_median_top, ci)
+        bottom = grouped.apply(self._ci_median_bottom, ci)
+
+        return top.values, bottom.values
+
     def add_ts(self, ax, data, name, subgroup='time', mean_line_dict=None, fill_dict=None, ci=0.83, fill=True,
-               scatter=True, no_fill_legend=False):
+               scatter=True, no_fill_legend=False, stat='mean'):
         gene = data.name
         data = data.reset_index()
         grouped_stats = self.tsstats(gene, data, groupby=subgroup, ci=ci, group=subgroup)
@@ -258,7 +281,11 @@ class DEPlot(object):
             fill_dict = dict()
         mean_defaults = dict(ls='-', marker='s', lw=2, mew=0, label=(name), ms=10)
         mean_kwargs = dict(mean_defaults, **mean_line_dict)
-        mean_line, = ax.plot(grouped_stats[subgroup], grouped_stats['mean'], **mean_kwargs)
+        if stat == 'mean' or stat is None:
+            y = grouped_stats['mean']
+        elif stat == 'median':
+            y = grouped_stats['median']
+        mean_line, = ax.plot(grouped_stats.index, y, **mean_kwargs)
         mean_color = mean_line.get_color()
 
         if scatter:
@@ -271,17 +298,25 @@ class DEPlot(object):
                 fill_label = (name + (' {:d}%CI'.format(int(ci * 100))))
             fill_defaults = dict(lw=0, facecolor=mean_color, alpha=0.1, label=fill_label)
             fill_kwargs = dict(fill_defaults, **fill_dict)
-            ci_lines = self.confidence_interval_lines(grouped_stats['mean'], grouped_stats['se'], grouped_stats['tstat'])
-            ax.fill_between(grouped_stats[subgroup], ci_lines[0], ci_lines[1], **fill_kwargs)
+
+            if stat == 'mean' or stat is None:
+                ci_lines = self.confidence_interval_lines(grouped_stats['mean'], grouped_stats['sem'], grouped_stats['tstat'])
+            elif stat == 'median':
+                ci_lines = self.ci_median(data, subgroup, ci)
+            ax.fill_between(grouped_stats.index, ci_lines[0], ci_lines[1], **fill_kwargs)
 
     def tsplot(self, df, ax=None, legend=True, supergroup='condition', subgroup='time',
-               color_dict=None, markers=None, ls=None, **kwargs):
+               color_dict=None, markers=None, ls=None, stats=None, **kwargs):
         if markers is None:
             markers = ['o']
         if ls is None:
             ls = ['-']
+        if stats is None:
+            stats = [None]
         markers = itertools.cycle(markers)
         ls = itertools.cycle(ls)
+        stats = itertools.cycle(stats)
+
         gene = df.name
         supers = sorted(list(set(df.index.get_level_values(supergroup))))
         if not ax:
@@ -295,8 +330,10 @@ class DEPlot(object):
                                    'marker': next(markers),
                                    'ls': next(ls)}
                 kwargs['mean_line_dict'].update(mean_line_props)
+                kwargs['stat'] = next(stats)
             except (TypeError, KeyError):
                 pass
+
             self.add_ts(ax, sup_data, sup, subgroup=subgroup,
                         **kwargs)
         # ax.set_xlim([np.min(grouped_stats[0]), np.max(grouped_stats[0])])\

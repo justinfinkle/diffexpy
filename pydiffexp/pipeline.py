@@ -7,10 +7,11 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import pandas as pd
-from pydiffexp import DEAnalysis, DEPlot, pairwise_corr
-from pydiffexp.gnw import GnwNetResults, GnwSimResults, draw_results, get_graph
 from scipy import stats
 from sklearn.metrics import mean_squared_error as mse
+
+from pydiffexp import DEAnalysis, DEPlot, pairwise_corr
+from pydiffexp.gnw import GnwNetResults, GnwSimResults, draw_results, get_graph
 
 
 class DynamicDifferentialExpression(object):
@@ -293,9 +294,14 @@ class DynamicDifferentialExpression(object):
         self.dea = self.fit_dea(self.dea, data, **kwargs)
         self.times = self.dea.times
 
-    def fit_sim(self, data, **kwargs):
+    def fit_sim(self, data, stack=None, **kwargs):
         kwargs.setdefault('counts', False)
         kwargs.setdefault('log2', True)
+        idx_name = data.index.name
+        if stack:
+            data = data.stack(level=stack)
+            data.index = ["-{}".format(ii[0]) if ii[1]==-1 else str(ii[0]) for ii in data.index.values]
+            data.index.name = idx_name
         self.sim_dea = self.fit_dea(self.sim_dea, data, **kwargs)
 
     @staticmethod
@@ -356,8 +362,8 @@ class DynamicDifferentialExpression(object):
 
         return match
 
-    def train(self, project, data, sim_data, override=False, exp='ko', ctrl='wt',
-              data_kwargs=None, sim_kwargs=None):
+    def train(self, project, data, sim_data, override=False, correlate=False, exp='ko', ctrl='wt',
+              sim_stack=None, data_kwargs=None, sim_kwargs=None):
         """
         Train DDE estimators
 
@@ -389,7 +395,7 @@ class DynamicDifferentialExpression(object):
         # Fit the simulation data
         if sim_kwargs is None:
             sim_kwargs = {}
-        self.fit_sim(sim_data, override=override, **sim_kwargs)
+        self.fit_sim(sim_data, override=override, stack=sim_stack, **sim_kwargs)
 
         # Get dDEGs
         ddegs = self.dea.results[contrast].get_dDegs()
@@ -403,7 +409,7 @@ class DynamicDifferentialExpression(object):
         filtered_sim = self.sim_dea.data.loc[:, contrast.split('-')]
 
         # Correlate the mean trajectories
-        corr = self.correlate(filtered_data, filtered_sim, override=override)
+        corr = self.correlate(filtered_data, filtered_sim, override=correlate)
 
         # Match the genes to simulation networks
         sim_scores = self.sim_dea.results[contrast].cluster_scores
@@ -441,6 +447,8 @@ class DynamicDifferentialExpression(object):
                 all_corr.append(pcorr)
                 print('DONE')
             corr = (all_corr[0] + all_corr[1]) / 2
+            print('Pickling correlation results')
+            corr.to_pickle(self.corr_path)
 
         return corr
 

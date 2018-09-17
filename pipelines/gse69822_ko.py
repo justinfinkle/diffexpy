@@ -8,17 +8,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import FancyArrowPatch, ArrowStyle
 from matplotlib.ticker import FormatStrFormatter
 from matplotlib.transforms import Affine2D
-from matplotlib.colors import LinearSegmentedColormap
 from palettable.cartocolors.qualitative import Bold_8, Prism_10
+from scipy import integrate, stats
+from sklearn.utils import shuffle
+
 from pydiffexp import DEPlot
 from pydiffexp.pipeline import DynamicDifferentialExpression as DDE
 from pydiffexp.plot import elbow_criteria
 from pydiffexp.utils import multiindex_helpers as mi
-from scipy import integrate, stats
-from sklearn.utils import shuffle
 
 # Set defaults
 mpl.rcParams['axes.labelweight'] = 'bold'
@@ -174,7 +175,7 @@ def plot_net(ax, node_info, models, labels, cmap, pie_colors):
         ax.add_artist(fa)
 
     ax.axis('equal')
-    ax.set_ylabel("n = {}".format(len(models)), rotation=0, va='top')
+    ax.set_ylabel("n = {}".format(len(models)), rotation=0, va='top', fontweight='normal')
 
 
 def load_sim_data(path, node='y', perturb: Union[int, tuple, None]=1):
@@ -459,12 +460,15 @@ def stars(p):
         s = ""
     return s
 
+
 def plot_genes(sub_spec, leg_spec, net_spec, matches, dde, sim_dea, tx_to_gene, net_data, ts):
     # genes = [top.index[29],  ts.sort_values('percent', ascending=False).index[0],
     #          ts.sort_values('percent', ascending=False).index[30]]
     # genes = ts.index[np.random.randint(0, len(top), size=3)]
     # genes = top.sort_values('grouped_e').index[:3]
-    genes = ['ENSG00000117289', 'ENSG00000213626', 'ENSG00000170044']
+    # genes = ['ENSG00000117289', 'ENSG00000213626', 'ENSG00000170044']
+    genes = ['ENSG00000074054', 'ENSG00000102760', 'ENSG00000131759']
+
     w_ratios = [1]*len(genes)+[0.1, 0.1]
     cols = len(genes)+2
     gs_top = gridspec.GridSpecFromSubplotSpec(2, cols, subplot_spec=sub_spec,
@@ -488,6 +492,8 @@ def plot_genes(sub_spec, leg_spec, net_spec, matches, dde, sim_dea, tx_to_gene, 
     pie_colors = ['#0F8554', '#E17C05', '0.2', '0.7']
     train_markers = ['o', '^']
     test_markers = ['d', 'X', 's']
+    test_stats = ['mean', 'median', 'median']
+    test_lines = ['-', '-', '--']
     plot_times = dde.times.copy()
     plot_times.remove(15)
     for idx, gene in enumerate(genes):
@@ -498,19 +504,20 @@ def plot_genes(sub_spec, leg_spec, net_spec, matches, dde, sim_dea, tx_to_gene, 
                        no_fill_legend=True, color_dict=colors, scatter=False, markers=train_markers)
             train_ax.set_title(tx_to_gene.loc[gene, 'hgnc_symbol'])
             train_ax.set_ylabel('log2(counts)')
-            train_ax.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))
+            train_ax.yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
             train_ax.set_xlabel('')
             train_ax.set_xlim(min(plot_times), max(plot_times))
             train_ax.set_xticks(plot_times)
             train_ax.set_xticklabels([])
 
             plot_gene_prediction(gene, matches, dde.dea.data, sim_dea.results['ki-wt'], sim_dea.times, tx_to_gene,
-                                 ax=pred_ax, no_fill_legend=True, color_dict=colors, markers=test_markers)
+                                 ax=pred_ax, no_fill_legend=True, color_dict=colors, markers=test_markers,
+                                 stats=test_stats, ls=test_lines)
             pred_ax.set_xlim(min(plot_times), max(plot_times))
             pred_ax.set_xticks(plot_times)
             pred_ax.set_xticklabels(plot_times, rotation=90)
             pred_ax.set_ylabel('log2(counts)')
-            pred_ax.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))
+            pred_ax.yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
             pred_ax.set_title('')
 
             if idx != 0:
@@ -521,7 +528,9 @@ def plot_genes(sub_spec, leg_spec, net_spec, matches, dde, sim_dea, tx_to_gene, 
         labels = ['G', 'x', 'y']
         logics = ['_multiplicative', '_linear', '']
         node_info = {}
-        models = net_data.loc[matches[matches.train_gene == gene]['net'].values]
+        networks = matches[matches.train_gene == gene]['net'].values
+        networks = [int(net.replace('-', '')) for net in networks]
+        models = net_data.loc[networks]
         for node in labels:
             cur_dict = {}
             counts = Counter(models['{}_logic'.format(node)])
@@ -537,7 +546,7 @@ def plot_genes(sub_spec, leg_spec, net_spec, matches, dde, sim_dea, tx_to_gene, 
             leg = net_ax.legend(['AND', 'OR', 'Single input', 'No input'], loc='center left',
                                 bbox_to_anchor=(1, 0.5), handletextpad=0.5, frameon=False,
                                 handlelength=1)
-            leg.set_title("Node regulation", prop={'size': 24})
+            leg.set_title("Node \nRegulation", prop={'size': 28, 'weight': 'bold'})
 
     # Add the legends
     labels = {'wt': 'Wildtype', 'ko': 'PI3K KO', 'ki': 'PI3K KI'}
@@ -571,7 +580,7 @@ def plot_genes(sub_spec, leg_spec, net_spec, matches, dde, sim_dea, tx_to_gene, 
     astyle = ArrowStyle('wedge', tail_width=height, shrink_factor=0.5)
     fa = FancyArrowPatch(posA=[0, 0.5], posB=[1, 0.5], arrowstyle=astyle, lw=0, color='k')
     arrow_ax.add_artist(fa)
-    arrow_ax.set_title('fraction of models \n edge exists')
+    arrow_ax.set_title('Fraction of models \n edge exists')
     arrow_ax.set_xticks([0, 1])
     arrow_ax.set_xticklabels(['100%', '0%'])
 
@@ -707,7 +716,8 @@ def main():
         ===================================
     """
     # dde = DDE(project_name)
-    # dde.train(project_name, basic_data, sim_data, exp=e_condition, override=override)
+    # dde.train(project_name, basic_data, sim_data, exp=e_condition,
+    #           override=override, correlate=False)
     # # A lot went into the training. We should save the results
     # dde.to_pickle()
 
