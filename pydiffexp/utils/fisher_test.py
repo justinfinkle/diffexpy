@@ -74,19 +74,20 @@ def tf_to_gene_dict(gene_list, gene_to_tf_dict):
     tf_set = set(chain(*gene_to_tf_dict.values()))
 
     # Initialize dictionary with TFs as keys
-    tf_dict = {tf: set() for tf in tf_set}
+    tf_dict = {tf: None for tf in tf_set}
 
     # For each TF
     for tf in tf_dict.keys():
 
         # Add the gene to the set if the TF is a associated with it
+        tf_match = []
         for gene in gene_list:
             try:
                 if tf in gene_to_tf_dict[gene]:
-                    tf_dict[tf].update(gene)
+                    tf_match.append(gene)
             except KeyError:
                 pass
-
+        tf_dict[tf] = set(tf_match)
     return tf_dict
 
 

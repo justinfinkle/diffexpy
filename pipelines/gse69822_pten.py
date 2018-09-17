@@ -520,7 +520,7 @@ def main():
 
     ensembl_to_hgnc = pd.read_csv('../data/GSE69822/mcf10a_gene_names.csv', index_col=0)
     hgnc_to_ensembl = ensembl_to_hgnc.reset_index().set_index('hgnc_symbol')
-    gene_dict = pd.read_pickle('../data/tf_associations/human_encode_associations.pkl')
+    gene_to_tf_dict = pd.read_pickle('../data/tf_associations/human_encode_associations.pkl')
 
     """
         ===================================
@@ -531,11 +531,10 @@ def main():
     sankey_plots = True
     e_condition = ['pten']  # The experimental condition used
     c_condition = 'wt'  # The control condition used
-    all_tf_dict = pd.read_pickle('GSE69822/GSE69822_all_tf_dict.pkl')
-    all_genes_tf = pd.read_pickle('GSE69822/GSE69822_all_genes_tf.pkl')
-    # all_genes_tf, all_tf_dict = ft.convert_gene_to_tf(set(hgnc_to_ensembl.index), gene_dict)
-    # pd.to_pickle(all_tf_dict, 'GSE69822/GSE69822_all_tf_dict.pkl')
-    # pd.to_pickle(all_genes_tf, 'GSE69822/GSE69822_all_genes_tf.pkl')
+
+    # tf_to_gene_dict = ft.tf_to_gene_dict(gene_to_tf_dict.keys(), gene_to_tf_dict)
+    # pd.to_pickle(tf_to_gene_dict, 'GSE69822/GSE69822_tf_to_gene_dict.pkl')
+    tf_to_gene_dict = pd.read_pickle('GSE69822/GSE69822_tf_to_gene_dict.pkl')
 
     # Remove unnecessary data
     for idx, e in enumerate(e_condition):
@@ -551,12 +550,12 @@ def main():
 
         # DRG Enrichment
         drg_genes = ensembl_to_hgnc.loc[gc['DRG'], 'hgnc_symbol']
-        filtered_tf, drg_tf_dict = ft.convert_gene_to_tf(drg_genes, gene_dict)
+        filtered_tf, drg_tf_dict = ft.convert_gene_to_tf(drg_genes, gene_to_tf_dict)
         enrich = ft.calculate_study_enrichment(len(drg_genes), drg_tf_dict, len(dea.data), all_tf_dict)
         print(enrich.head())
 
         filtered_genes = ensembl_to_hgnc.loc[ar_der.discrete[ar_der.discrete.iloc[:, -1] == -1].index, 'hgnc_symbol']
-        filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_dict)
+        filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_to_tf_dict)
         enrich = ft.calculate_study_enrichment(len(filtered_genes), filtered_tf_dict, len(dea.data), all_tf_dict)
         print(enrich.head())
 
@@ -578,7 +577,7 @@ def main():
         # Timing enrichment
         ts_diff = sign_diff(dea, ts_der, gc['DRG'], e, c_condition)
         bg_genes = ensembl_to_hgnc.loc[gc['DRG'], 'hgnc_symbol'].values
-        bg, bg_dict = ft.convert_gene_to_tf(bg_genes, gene_dict)
+        bg, bg_dict = ft.convert_gene_to_tf(bg_genes, gene_to_tf_dict)
 
         drg_tfs = ensembl_to_hgnc.loc[
             set.intersection(*[gc['DRG'], hgnc_to_ensembl.loc[hgnc_to_ensembl.index.intersection(all_tf_dict.keys()), 'ensembl_gene_id'].values])]
@@ -586,7 +585,7 @@ def main():
 
         filtered_ensmbl = ts_diff[(ts_diff.iloc[:, 3] == 1)].index
         filtered_genes = ensembl_to_hgnc.loc[filtered_ensmbl, 'hgnc_symbol']
-        filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_dict)
+        filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_to_tf_dict)
         print(len(filtered_genes), len(filtered_tf), len(bg))
         enrich = ft.calculate_study_enrichment(len(filtered_genes), filtered_tf_dict, len(drg_genes), drg_tf_dict)
         enrich = enrich[enrich.FDR_reject]
