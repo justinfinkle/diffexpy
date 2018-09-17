@@ -15,6 +15,7 @@ setup(
         'palettable',
         'natsort',
         'matplotlib',
-        'networkx'
-    ]
+        'networkx'],
+    test_suite='nose.collector',
+    tests_require=['nose'],
 )
