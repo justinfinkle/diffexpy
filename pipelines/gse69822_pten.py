@@ -1,15 +1,18 @@
 from collections import OrderedDict
 
+import matplotlib as mpl
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import rpy2.robjects as robj
 import seaborn as sns
+from cycler import cycler
 from goatools import GOEnrichmentStudy
 from goatools.obo_parser import GODag
 from matplotlib.ticker import FormatStrFormatter
 from palettable.cartocolors.qualitative import Bold_8, Prism_10
+from palettable.colorbrewer.sequential import Blues_9
 from rpy2.robjects.packages import importr
 from scipy import stats
 
@@ -18,6 +21,9 @@ from pydiffexp.utils import all_subsets
 from pydiffexp.utils import fisher_test as ft
 from pydiffexp.utils import multiindex_helpers as mi
 from pydiffexp.utils import r2py as rh
+
+# Set defaults
+mpl.rcParams['axes.labelweight'] = 'bold'
 
 # Import discrete goodness of fit
 dgof = importr('dgof')
@@ -142,9 +148,9 @@ def get_gene_classes(dea, contrast, p=0.05, strict_dde=True):
     ar_der = dea.results['({})_ar'.format(contrast)]    # type: DEResults
 
     deg = set(der.top_table(p=p).index)
-    dde = set(der.get_dDegs().index)
+    ddeg = set(der.get_dDegs().index)
     if strict_dde:
-        dde = dde.intersection(deg)
+        ddeg = ddeg.intersection(deg)
 
     # Differentially responding genes
     ar_dt = set(ar_der.top_table(p=p).index)
@@ -154,7 +160,7 @@ def get_gene_classes(dea, contrast, p=0.05, strict_dde=True):
     drg = ar_dt
 
     # Maintain a sort order for pretty plots downstream
-    gene_classes = OrderedDict([('DEG', deg), ('DDE', dde), ('DRG', drg)])
+    gene_classes = OrderedDict([('DEG', deg), ('dDEG', ddeg), ('DRG', drg)])
 
     return der, ar_der, ts_der, gene_classes
 
@@ -321,8 +327,8 @@ def plot_collections(hm_data, hash_data, term_data, output='show'):
     hidden_ax.set_ylabel('')
     hidden_ax.axis('off')
 
-    index_order = ['DEG', 'DDE', 'DRG', 'DEG∩DDE', 'DEG∩DRG',
-                   'DDE∩DRG', 'DEG∩DDE∩DRG', 'All']
+    index_order = ['DEG', 'dDEG', 'DRG', 'DEG∩dDEG', 'DEG∩DRG',
+                   'dDEG∩DRG', 'DEG∩dDEG∩DRG', 'All']
 
     c_index = [1, 7, 5, 9, 3, 6]
     colors = [Prism_10.mpl_colors[idx] for idx in c_index] + ['k', '0.5']
@@ -336,21 +342,24 @@ def plot_collections(hm_data, hash_data, term_data, output='show'):
     all_x = pd.concat([x, full_dist])
     g = all_x.groupby('gene_class')
 
+    # Remove groups if there aren't any in that group
+    box_order = [idx for idx in index_order if idx in g.groups.keys()]
+
     go_ax = sns.boxplot(data=g.filter(lambda xx: True), x='depth', y='gene_class',
-                        order=index_order, ax=go_ax,
+                        order=box_order, ax=go_ax,
                         showfliers=False, boxprops=dict(linewidth=0),
                         medianprops=dict(solid_capstyle='butt', color='w'),
                         palette=cmap)
 
     small_groups = g.filter(lambda x: len(x) < 50)
     go_ax = sns.swarmplot(data=small_groups, x='depth', y='gene_class',
-                          order=index_order, ax=go_ax, color='k')
+                          order=box_order, ax=go_ax, color='k')
 
     go_ax.plot([x['depth'].median(), x['depth'].median()],
                go_ax.get_ylim(), 'k-', lw=2, zorder=0, c='0.25')
 
     term_sizes = g.apply(len).reindex(index_order).fillna(0).astype(int)
-    y_ticks = ["n={}".format(term_sizes.loc[idx]) for idx in index_order]
+    y_ticks = ["n={}".format(term_sizes.loc[idx]) for idx in box_order]
     go_ax.set_yticklabels(y_ticks)
     go_ax.set_ylabel('')
     plt.tight_layout()
@@ -375,7 +384,8 @@ def plot_sankey(gs, gc, ar_der, dea, e, ts_der, c_condition):
     dep = DEPlot()
 
     cur_ax = plt.subplot(gs[0, 0])
-    seg_color = Prism_10.mpl_colors[5]
+    node_color = "#666666"
+    seg_color = '#B3B3B3'
     gene_class = 'DRG'
     genes = gc[gene_class]
     path_df = ar_der.discrete.loc[genes]
@@ -384,15 +394,15 @@ def plot_sankey(gs, gc, ar_der, dea, e, ts_der, c_condition):
     path_df = path_df[(path_df != 0).any(axis=1)]
     path_df.columns = dea.times
     # recolor selected node
-    node_color_dict = {(5, -1): Bold_8.mpl_colors[0]}
+    node_color_dict = {(5, -1): Prism_10.mpl_colors[6]}
     print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
-    cur_ax = dep.plot_flows(cur_ax, ['diff'], ['0.5'], [1], ['all'],
+    cur_ax = dep.plot_flows(cur_ax, ['diff'], [seg_color], [1], ['all'],
                             x_coords=path_df.columns, min_sw=0.01, max_sw=1,
                             uniform=True, path_df=path_df, node_width=None,
-                            legend=False, node_color=seg_color, node_color_dict=node_color_dict)
+                            legend=False, node_color=node_color, node_color_dict=node_color_dict)
     cur_ax.set_xticklabels('')
     annotate_n(cur_ax, len(path_df))
-    cur_ax.set_ylabel('Discrete \nFC')
+    cur_ax.set_ylabel('Discrete \n∆FC')
     cur_ax.set_yticks(range(-1, 2))
 
     ts_diff_signs = sign_diff(dea, ts_der, genes, e, c_condition)
@@ -405,15 +415,15 @@ def plot_sankey(gs, gc, ar_der, dea, e, ts_der, c_condition):
     print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
 
     cur_ax = plt.subplot(gs[1, 0])
-    highlight = Bold_8.mpl_colors[0]
-    segs = [(3, -1), (3, 0), (3, 1), (3, 2), (4, -2), (4, -1), (4, 0), (4, 1)]
+    highlight = Prism_10.mpl_colors[6]
+    segs = [(3, -1), (3, 0), (3, 1), (3, 2)]#, (4, -2), (4, -1), (4, 0), (4, 1)]
     seg_color_dict = {'up': {s: highlight for s in segs},
                       'down': None,
                       'over': None}
-    cur_ax = dep.plot_flows(cur_ax, ['diff'], ['0.5'], [1], ['all'],
+    cur_ax = dep.plot_flows(cur_ax, ['diff'], [seg_color], [1], ['all'],
                             x_coords=path_df.columns, min_sw=0.01, max_sw=1,
                             uniform=True, path_df=path_df, node_width=None,
-                            legend=False, node_color=seg_color, seg_color_dict=seg_color_dict)
+                            legend=False, node_color=node_color, seg_color_dict=seg_color_dict)
 
     cur_ax.set_xticklabels(path_df.columns)
     cur_ax.set_ylim([-4, 4])
@@ -422,15 +432,14 @@ def plot_sankey(gs, gc, ar_der, dea, e, ts_der, c_condition):
     cur_ax.set_ylabel('Cumulative Trajectory\nDifferences')
 
 
-def plot_lfc(dea, gene, ax, **kwargs):
-    der = dea.results['(pten-wt)_ar']
+def plot_lfc(der, times, gene, ax, **kwargs):
     ci = der.get_confint(der.coefficients.columns).loc[gene].groupby(level=0)
     ci_l = [0]+ci.get_group('L').values.tolist()
     ci_r = [0] + ci.get_group('R').values.tolist()
     mean_val = [0]+der.coefficients.loc[gene].values.tolist()
-    mean_line, = ax.plot(dea.times, mean_val, '-', marker='s', **kwargs)
+    mean_line, = ax.plot(times, mean_val, '-', marker='s', **kwargs)
     mean_color = mean_line.get_color()
-    ax.fill_between(dea.times, ci_l, ci_r, lw=0, alpha=0.2, color=mean_color)
+    ax.fill_between(times, ci_l, ci_r, lw=0, alpha=0.2, color=mean_color)
     return
 
 
@@ -438,19 +447,32 @@ def plot_bio_insight(gs, reg_dict, dea, ensembl_to_hgnc):
     # todo: figure out how to make this dynamic
     bio_gs = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs)
     sns.set_style('whitegrid')
+    times = dea.times
     for ii, (reg, targets) in enumerate(reg_dict.items()):
+        if ii==0:
+            der = dea.results['(pten-wt)_ar']
+        elif ii==1:
+            der = dea.results['(pten-wt)_ts']
+
         reg_ax = plt.subplot(bio_gs[ii])
+        # Set the color cycler
+        colors = [Blues_9.mpl_colors[idx] for idx in range(2, 9, 2)]
+        reg_ax.set_prop_cycle(cycler('color', colors))
         gene = ensembl_to_hgnc.loc[reg, 'hgnc_symbol']
-        plot_lfc(dea, reg, reg_ax, label=gene, lw=3, ms=10)
-        reg_ax.set_ylabel(r'LFC$_t$-LFC$_0$')
+        plot_lfc(der,times, reg, reg_ax, label=gene, lw=3, ms=10, color=Prism_10.mpl_colors[6])
 
         for jj, tar in enumerate(targets):
             gene = ensembl_to_hgnc.loc[tar, 'hgnc_symbol']
-            plot_lfc(dea, tar, reg_ax, label=gene, zorder=0)
+            plot_lfc(der, times, tar, reg_ax, label=gene, zorder=0)
         if ii == 1:
             reg_ax.set_xlabel('Time (min)')
+            reg_ax.set_ylabel(r'LFC$_t$-LFC$_{t-1}$')
+        elif ii == 0:
+            reg_ax.set_xticklabels([])
+            reg_ax.set_ylabel(r'LFC$_t$-LFC$_0$')
         reg_ax.yaxis.set_major_formatter(FormatStrFormatter('%0.1f'))
         reg_ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False)
+        reg_ax.set_xlim(min(times), max(times))
 
 
 def plot_panel(gc, ar_der, dea, ts_der, e, c_condition, reg_dict, ensembl_to_hgnc):
@@ -464,6 +486,7 @@ def plot_panel(gc, ar_der, dea, ts_der, e, c_condition, reg_dict, ensembl_to_hgn
     plot_bio_insight(gs[1], reg_dict, dea, ensembl_to_hgnc)
     # plt.subplots_adjust(left=0.07, right=0.97, top=0.95)
     plt.tight_layout()
+    plt.show()
 
 
 def main():
@@ -511,6 +534,8 @@ def main():
     all_tf_dict = pd.read_pickle('GSE69822/GSE69822_all_tf_dict.pkl')
     all_genes_tf = pd.read_pickle('GSE69822/GSE69822_all_genes_tf.pkl')
     # all_genes_tf, all_tf_dict = ft.convert_gene_to_tf(set(hgnc_to_ensembl.index), gene_dict)
+    # pd.to_pickle(all_tf_dict, 'GSE69822/GSE69822_all_tf_dict.pkl')
+    # pd.to_pickle(all_genes_tf, 'GSE69822/GSE69822_all_genes_tf.pkl')
 
     # Remove unnecessary data
     for idx, e in enumerate(e_condition):
@@ -520,16 +545,19 @@ def main():
 
         dea = fit_dea(dea_path, data=basic_data, reference_labels=contrast_labels, index_names=sample_features)
         der, ar_der, ts_der, gc = get_gene_classes(dea, contrast)
+        # Group sizes
+        sizes, collect = all_subsets([gc['DRG'], gc['DEG'], gc['dDEG']], ['DRG', 'DEG', 'dDEG'])
+        print(sizes)
 
         # DRG Enrichment
-        filtered_genes = ensembl_to_hgnc.loc[gc['DRG'], 'hgnc_symbol']
-        filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_dict)
-        enrich = ft.calculate_study_enrichment(filtered_tf, all_genes_tf)
+        drg_genes = ensembl_to_hgnc.loc[gc['DRG'], 'hgnc_symbol']
+        filtered_tf, drg_tf_dict = ft.convert_gene_to_tf(drg_genes, gene_dict)
+        enrich = ft.calculate_study_enrichment(len(drg_genes), drg_tf_dict, len(dea.data), all_tf_dict)
         print(enrich.head())
 
         filtered_genes = ensembl_to_hgnc.loc[ar_der.discrete[ar_der.discrete.iloc[:, -1] == -1].index, 'hgnc_symbol']
         filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_dict)
-        enrich = ft.calculate_study_enrichment(filtered_tf, all_genes_tf)
+        enrich = ft.calculate_study_enrichment(len(filtered_genes), filtered_tf_dict, len(dea.data), all_tf_dict)
         print(enrich.head())
 
         reg_target_dict = OrderedDict()
@@ -550,17 +578,17 @@ def main():
         # Timing enrichment
         ts_diff = sign_diff(dea, ts_der, gc['DRG'], e, c_condition)
         bg_genes = ensembl_to_hgnc.loc[gc['DRG'], 'hgnc_symbol'].values
-        bg, _ = ft.convert_gene_to_tf(bg_genes, gene_dict)
+        bg, bg_dict = ft.convert_gene_to_tf(bg_genes, gene_dict)
 
         drg_tfs = ensembl_to_hgnc.loc[
             set.intersection(*[gc['DRG'], hgnc_to_ensembl.loc[hgnc_to_ensembl.index.intersection(all_tf_dict.keys()), 'ensembl_gene_id'].values])]
         drg_tfs = drg_tfs.reset_index().set_index('hgnc_symbol')
 
-        filtered_ensmbl = ts_diff[(ts_diff.iloc[:, 3] == 1) | (ts_diff.iloc[:, 4] == 1)].index
+        filtered_ensmbl = ts_diff[(ts_diff.iloc[:, 3] == 1)].index
         filtered_genes = ensembl_to_hgnc.loc[filtered_ensmbl, 'hgnc_symbol']
         filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_dict)
         print(len(filtered_genes), len(filtered_tf), len(bg))
-        enrich = ft.calculate_study_enrichment(filtered_tf, bg)
+        enrich = ft.calculate_study_enrichment(len(filtered_genes), filtered_tf_dict, len(drg_genes), drg_tf_dict)
         enrich = enrich[enrich.FDR_reject]
         enrich.set_index('TF', inplace=True)
         print(enrich[enrich.FDR_reject].sort_values('p_bonferroni'))
@@ -588,16 +616,16 @@ def main():
 
             # Get the data to plot
             hm_data = get_heatmap_data(dea, der, gc['DEG'])
-            hash_keys = ['DDE', 'DRG']
+            hash_keys = ['dDEG', 'DRG']
             hash_data = get_hash_data(hm_data, {k: gc[k] for k in hash_keys})
 
             # Plot the data
-            plot_collections(hm_data, hash_data, enriched)
+            path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_3/3_pten_gene_classification.pdf"
+            plot_collections(hm_data, hash_data, enriched, output=path)
 
         if sankey_plots:
             plot_panel(gc, ar_der, dea, ts_der, e, c_condition, reg_target_dict, ensembl_to_hgnc)
-            plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_4/4_DRG_pten_summary.pdf", fmt='pdf')
-
+            # plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_4/4_DRG_pten_summary.pdf", fmt='pdf')
 
 if __name__ == '__main__':
     main()
