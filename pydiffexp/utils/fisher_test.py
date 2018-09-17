@@ -1,6 +1,8 @@
 __author__ = 'Justin Finkle'
 __email__ = 'jfinkle@u.northwestern.edu'
 
+from itertools import chain
+
 import numpy as np
 import pandas as pd
 from scipy.stats import fisher_exact
@@ -59,6 +61,35 @@ def convert_gene_to_tf(gene_list, gene_dict):
                 continue
 
     return tf_list, tf_dict
+
+
+def tf_to_gene_dict(gene_list, gene_to_tf_dict):
+    """
+
+    :param gene_list:
+    :param gene_to_tf_dict:
+    :return:
+    """
+    # Get a set of TFs from the dictionary values
+    tf_set = set(chain(*gene_to_tf_dict.values()))
+
+    # Initialize dictionary with TFs as keys
+    tf_dict = {tf: set() for tf in tf_set}
+
+    # For each TF
+    for tf in tf_dict.keys():
+
+        # Add the gene to the set if the TF is a associated with it
+        for gene in gene_list:
+            try:
+                if tf in gene_to_tf_dict[gene]:
+                    tf_dict[tf].update(gene)
+            except KeyError:
+                pass
+
+    return tf_dict
+
+
 
 
 def calculate_study_enrichment(study_count, study_assoc_dict, bg_count, bg_assoc_dict, fdr=0.05):
