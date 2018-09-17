@@ -90,8 +90,10 @@ def tf_to_gene_dict(gene_list, gene_to_tf_dict):
         tf_dict[tf] = set(tf_match)
     return tf_dict
 
-
-
+def calc_frac(x, split_str='/'):
+    splits = np.array([np.array(s.split(split_str), dtype=float) for s in x])
+    frac = splits[:, 0]/splits[:, 1]
+    return frac
 
 def calculate_study_enrichment(study_count, study_assoc_dict, bg_count, bg_assoc_dict, fdr=0.05):
     """
@@ -109,21 +111,22 @@ def calculate_study_enrichment(study_count, study_assoc_dict, bg_count, bg_assoc
     study_term_set = list(set(study_assoc_dict.keys()))
 
     # Calculate p_value for each term
-    p_values = np.array([fisher_score(tf, study_assoc_dict, bg_assoc_dict, study_count, bg_count) for tf in study_term_set])
-
+    p_values, s_frac, bg_frac = zip(*[fisher_score(tf, study_assoc_dict, bg_assoc_dict, study_count, bg_count) for tf in study_term_set])
+    fold_enrich = calc_frac(s_frac)/calc_frac(bg_frac)
+    p_values = np.array(p_values)
     # Bonferroni correction
     corrected_p = p_values*len(study_term_set)
 
     # Make results table
-    results_table = pd.DataFrame(np.vstack((p_values, corrected_p)).T, columns=['p_uncorrected', 'p_bonferroni'])
-    results_table.insert(0, 'TF', study_term_set)
-    results_table.set_index('TF', inplace=True)
+    rows = ['study_ratio', 'bg_ratio', 'fold_enrichment', 'p_uncorrected', 'p_bonferroni']
+    data = [s_frac, bg_frac, fold_enrich, p_values, corrected_p]
+    results_table = pd.DataFrame(data, index=rows, columns=study_term_set).T
     results_table.sort_values('p_uncorrected', inplace=True)
 
     #FDR correcton
     results_table['FDR_thresh'] = np.arange(1, len(results_table)+1)/float(len(results_table))*fdr
     results_table['FDR_reject'] = results_table['p_uncorrected'] < results_table['FDR_thresh']
-    results_table.sort_values('FDR_reject', ascending=False, inplace=True)
+    results_table.sort_values(['FDR_reject', 'p_bonferroni'], ascending=[False, True], inplace=True)
     return results_table
 
 
@@ -139,11 +142,11 @@ def fisher_score(x, study_dict, bg_dict, study_count, bg_count):
     :return: float
         The p-value associated with the term
     """
-    c_table = make_contingency_table(x, study_dict, bg_dict, study_count, bg_count)
+    c_table, study_frac, bg_frac = make_contingency_table(x, study_dict, bg_dict, study_count, bg_count)
 
     # One sided test looking for over-representation so use 'greater'
     _, pvalue = fisher_exact(c_table, alternative='greater')
-    return pvalue
+    return pvalue, study_frac, bg_frac
 
 
 def make_contingency_table(x, study_dict, bg_dict, study_count, bg_count):
@@ -173,7 +176,13 @@ def make_contingency_table(x, study_dict, bg_dict, study_count, bg_count):
     contingency_table[0, 1] = selected_without_property
     contingency_table[1, 0] = not_selected_with_property
     contingency_table[1, 1] = not_selected_without_property
-    return contingency_table
+
+    rows = ['{}_assoc'.format(x), 'not_{}_assoc'.format(x)]
+    cols = ['study', 'background']
+    c_table = pd.DataFrame(contingency_table, index=rows, columns=cols, dtype=int)
+    study_frac = "{}/{}".format(selected_with_property, study_count)
+    bg_frac = "{}/{}".format(not_selected_with_property, bg_count)
+    return c_table, study_frac, bg_frac
 
 
 class Enricher(object):
@@ -183,6 +192,7 @@ class Enricher(object):
     def __init__(self, gene_tf_dict, background=None):
         # Gene to TF dictionary
         self._gtt = gene_tf_dict
+        self.all_tf = set(chain(*gene_tf_dict.values()))
 
         # Initialize background
         self._bg = None
@@ -215,15 +225,18 @@ class Enricher(object):
     def bg(self, genes):
         self._bg = tf_to_gene_dict(genes, self.gtt)
 
-    def study_enrichment(self, study_genes, fdr=0.05):
+    def study_enrichment(self, study_genes, bg_genes=None, fdr=0.05):
         # Exclude background
-        bg_genes = self.bg_genes.difference(study_genes)
+        if bg_genes is None:
+            bg_genes = self.bg_genes.copy()
+        bg_genes = set(bg_genes).difference(study_genes)
         bg = tf_to_gene_dict(bg_genes, self.gtt)
 
         # Make a TF dictionary
         study_dict = tf_to_gene_dict(study_genes, self.gtt)
         study_count = len(study_genes)
-        enrich = calculate_study_enrichment(study_count, study_dict, len(bg_genes), bg, fdr=fdr)
+        bg_count = len(bg_genes)
+        enrich = calculate_study_enrichment(study_count, study_dict, bg_count, bg, fdr=fdr)
         return enrich
 
 

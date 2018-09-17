@@ -395,11 +395,15 @@ def plot_sankey(gs, gc, ar_der, dea, e, ts_der, c_condition):
     path_df.columns = dea.times
     # recolor selected node
     node_color_dict = {(5, -1): Prism_10.mpl_colors[6]}
+    seg_color_dict = {'up': None,
+                      'down': {(4, 0): (251/255, 233/255, 215/255)},
+                      'over': {(4, -1): (251/255, 233/255, 215/255)}}
     print(path_df.apply(pd.Series.value_counts, axis=0).fillna(0).sort_index(ascending=False).astype(int))
     cur_ax = dep.plot_flows(cur_ax, ['diff'], [seg_color], [1], ['all'],
                             x_coords=path_df.columns, min_sw=0.01, max_sw=1,
                             uniform=True, path_df=path_df, node_width=None,
-                            legend=False, node_color=node_color, node_color_dict=node_color_dict)
+                            legend=False, node_color=node_color, node_color_dict=node_color_dict,
+                            seg_color_dict=seg_color_dict)
     cur_ax.set_xticklabels('')
     annotate_n(cur_ax, len(path_df))
     cur_ax.set_ylabel('Discrete \n∆FC')
@@ -486,7 +490,6 @@ def plot_panel(gc, ar_der, dea, ts_der, e, c_condition, reg_dict, ensembl_to_hgn
     plot_bio_insight(gs[1], reg_dict, dea, ensembl_to_hgnc)
     # plt.subplots_adjust(left=0.07, right=0.97, top=0.95)
     plt.tight_layout()
-    plt.show()
 
 
 def main():
@@ -551,27 +554,23 @@ def main():
 
         # DRG Enrichment
         dea_genes = ensembl_to_hgnc.loc[dea.data.index, 'hgnc_symbol'].values
-        er = ft.Enricher(gene_to_tf_dict, dea_genes)
+        er = ft.Enricher(gene_to_tf_dict)
 
         drg_genes = ensembl_to_hgnc.loc[gc['DRG'], 'hgnc_symbol'].values
-        enrich = er.study_enrichment(drg_genes)
-        drg_tf_dict = ft.tf_to_gene_dict(drg_genes, gene_to_tf_dict)
-        # filtered_tf, drg_tf_dict = ft.convert_gene_to_tf(drg_genes, gene_to_tf_dict)
-        enrich = ft.calculate_study_enrichment(len(drg_genes), drg_tf_dict, len(dea_genes), dea_tf_dict)
-        print(enrich.head())
+        drg_enrich = er.study_enrichment(drg_genes, bg_genes=dea_genes)
 
-        filtered_genes = ensembl_to_hgnc.loc[ar_der.discrete[ar_der.discrete.iloc[:, -1] == 1].index, 'hgnc_symbol']
-        f_tf_dict = ft.tf_to_gene_dict(filtered_genes.values, gene_to_tf_dict)
-        # filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_to_tf_dict)
-        enrich = ft.calculate_study_enrichment(len(filtered_genes), f_tf_dict, len(dea_genes), dea_tf_dict)
-        print(enrich.head())
+        # Specific timing
+        ar_down = ar_der.discrete[ar_der.discrete.iloc[:, -1] == -1]
+        ar_down_genes = ensembl_to_hgnc.loc[ar_down.index, 'hgnc_symbol'].values
+        ar_down_enrich = er.study_enrichment(ar_down_genes, bg_genes=drg_genes)
 
         reg_target_dict = OrderedDict()
-        tf = enrich.TF.iloc[0]
-        tf_genes = hgnc_to_ensembl.loc[hgnc_to_ensembl.index.intersection(all_tf_dict[tf]), 'ensembl_gene_id'].values
-        tf_genes_in_group = set(tf_genes).intersection(filtered_genes.index)
-        group_scores = ar_der.cluster_scores.reindex(filtered_genes.index).sort_values('cscore')
-        group_scores['tf_assoc'] = [ii in tf_genes_in_group for ii in group_scores.index]
+        tf = ar_down_enrich.index[0]
+        study_dict = ft.tf_to_gene_dict(ar_down_genes, gene_to_tf_dict)
+        tf_targets = study_dict[tf]
+        tf_genes = hgnc_to_ensembl.loc[hgnc_to_ensembl.index.intersection(tf_targets), 'ensembl_gene_id'].values
+        group_scores = ar_der.cluster_scores.reindex(ar_down.index).sort_values('cscore')
+        group_scores['tf_assoc'] = [ii in tf_genes for ii in group_scores.index]
 
         tf = hgnc_to_ensembl.loc[tf, 'ensembl_gene_id']
 
@@ -583,30 +582,26 @@ def main():
 
         # Timing enrichment
         ts_diff = sign_diff(dea, ts_der, gc['DRG'], e, c_condition)
-        bg_genes = ensembl_to_hgnc.loc[gc['DRG'], 'hgnc_symbol'].values
-        bg, bg_dict = ft.convert_gene_to_tf(bg_genes, gene_to_tf_dict)
 
         drg_tfs = ensembl_to_hgnc.loc[
-            set.intersection(*[gc['DRG'], hgnc_to_ensembl.loc[hgnc_to_ensembl.index.intersection(all_tf_dict.keys()), 'ensembl_gene_id'].values])]
+            set.intersection(*[gc['DRG'], hgnc_to_ensembl.loc[hgnc_to_ensembl.index.intersection(er.all_tf), 'ensembl_gene_id'].values])]
         drg_tfs = drg_tfs.reset_index().set_index('hgnc_symbol')
 
-        filtered_ensmbl = ts_diff[(ts_diff.iloc[:, 3] == 1)].index
-        filtered_genes = ensembl_to_hgnc.loc[filtered_ensmbl, 'hgnc_symbol']
-        filtered_tf, filtered_tf_dict = ft.convert_gene_to_tf(filtered_genes, gene_to_tf_dict)
-        print(len(filtered_genes), len(filtered_tf), len(bg))
-        enrich = ft.calculate_study_enrichment(len(filtered_genes), filtered_tf_dict, len(drg_genes), drg_tf_dict)
-        enrich = enrich[enrich.FDR_reject]
-        enrich.set_index('TF', inplace=True)
-        print(enrich[enrich.FDR_reject].sort_values('p_bonferroni'))
-        print(len(enrich))
-        print([(tf, tf in enrich.index) for tf in drg_tfs.index])
+        ts_up = ts_diff[(ts_diff.iloc[:, 3] == 1)].index
+        ts_up_genes = ensembl_to_hgnc.loc[ts_up, 'hgnc_symbol'].values
+        ts_up_enrich = er.study_enrichment(ts_up_genes, bg_genes=drg_genes)
+        ts_up_enrich = ts_up_enrich[ts_up_enrich.FDR_reject]
+        print(ts_up_enrich[ts_up_enrich.FDR_reject].sort_values('p_bonferroni'))
+        print(len(ts_up_enrich))
+        print([(tf, tf in ts_up_enrich.index) for tf in drg_tfs.index])
 
         tf = 'FOXA1'
-        tf_genes = hgnc_to_ensembl.loc[hgnc_to_ensembl.index.intersection(all_tf_dict[tf]), 'ensembl_gene_id'].values
-        tf_genes_in_group = set(tf_genes).intersection(filtered_genes.index)
+        study_dict = ft.tf_to_gene_dict(ts_up_genes, gene_to_tf_dict)
+        tf_targets = study_dict[tf]
+
         tf = hgnc_to_ensembl.loc[tf, 'ensembl_gene_id']
         tf_cluster = der.cluster_scores.loc[tf, 'Cluster']
-        group_scores = der.cluster_scores.reindex(filtered_genes.index).sort_values('cscore')
+        group_scores = der.cluster_scores.reindex(ts_up).sort_values('cscore')
         group_scores = group_scores[group_scores.Cluster == tf_cluster]
         tf_genes_to_plot = group_scores.index[-4:]
 
@@ -626,12 +621,13 @@ def main():
             hash_data = get_hash_data(hm_data, {k: gc[k] for k in hash_keys})
 
             # Plot the data
-            path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_3/3_pten_gene_classification.pdf"
+            path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_2/2_pten_gene_classification.pdf"
             plot_collections(hm_data, hash_data, enriched, output=path)
 
         if sankey_plots:
             plot_panel(gc, ar_der, dea, ts_der, e, c_condition, reg_target_dict, ensembl_to_hgnc)
-            # plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_4/4_DRG_pten_summary.pdf", fmt='pdf')
+            plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_3/3_DRG_pten_summary.pdf", fmt='pdf')
+
 
 if __name__ == '__main__':
     main()
