@@ -1,3 +1,4 @@
+import sys
 from collections import Counter
 from collections import OrderedDict
 from typing import Union
@@ -234,12 +235,16 @@ def calc_groups(df):
 
 
 def plot_top_cut(df, n_top, out_path=None):
-
-    plt.plot(range(len(df)), df.mean_abs_lfc / df.mean_abs_lfc.max(), label='sorted mean dev')
-    plt.plot([n_top, n_top], [0, 1], 'k', label='cutoff')
-    plt.plot([np.sum(df.iloc[:ii].percent > 0) / ii for ii in range(len(df))], '.', c='grey',
-             label='fraction TP')
-    plt.legend()
+    with sns.axes_style('whitegrid'):
+        plt.plot(range(len(df)), df.mean_abs_lfc, label='sorted mean dev', lw=3,
+                 c='k')
+        max_val = df.mean_abs_lfc.max()
+        plt.plot([n_top, n_top], [0, max_val], '--', label='cutoff')
+        plt.xlim(0, len(df))
+        plt.ylim(0, max_val)
+        plt.xlabel('Gene Prediction Rank')
+        plt.ylabel(r'Mean Absolute LFC($\frac{KO}{WT}$)')
+        plt.tight_layout()
     if out_path:
         plt.savefig(out_path, fmt='pdf')
         plt.close()
@@ -309,23 +314,41 @@ def random_order(x, n_shuff=100):
     return shuffled
 
 
-def pr_plot(unsorted, censored, ss):
-    shuffled = random_order(unsorted.percent.values)
-    correct_class = shuffled > 0
-    s_recall, s_fpr, s_precision, = calc_pr(correct_class)
-    plt.plot(s_recall, s_precision, '0.5', alpha=0.5)
-    plt.plot(np.mean(s_recall, axis=1), np.mean(s_precision, axis=1), 'k')
+def plot_pr(censored, test_sort, n_top, out_path):
+    with sns.axes_style('whitegrid'):
+        plt.figure(figsize=(10, 10))
+        shuffled = random_order(censored.percent.values)
+        correct_class = shuffled > 0
+        s_recall, s_fpr, s_precision, = calc_pr(correct_class)
+        plt.plot(s_recall, s_precision, '0.5', alpha=0.5)
+        plt.plot(np.mean(s_recall, axis=1), np.mean(s_precision, axis=1), 'k')
 
-    censored_correct = censored.percent > 0
-    c_recall, c_fpr, c_precision, = calc_pr(censored_correct, axis=0)
-    print('KO LFC AUPR: ', integrate.cumtrapz(c_precision, c_recall)[-1])
-    plt.plot(c_recall, c_precision)
+        censored_correct = censored.percent > 0
+        c_recall, c_fpr, c_precision, = calc_pr(censored_correct, axis=0)
+        c_aupr = integrate.cumtrapz(c_precision, c_recall)[-1]
+        print('KO LFC AUPR: ', c_aupr)
+        c_label = 'Train LFC ({:0.2f})'.format(c_aupr)
+        plt.plot(c_recall, c_precision, lw=3, label=c_label, color=Prism_10.mpl_colors[1])
 
-    ss_correct = ss.percent > 0
-    ss_recall, ss_fpr, ss_precision, = calc_pr(ss_correct, axis=0)
-    print('KI LFC AUPR: ', integrate.cumtrapz(ss_precision, ss_recall)[-1])
-    plt.plot(ss_recall, ss_precision)
-    plt.close()
+        ss_correct = test_sort.percent > 0
+        ss_recall, ss_fpr, ss_precision, = calc_pr(ss_correct, axis=0)
+        ss_aupr = integrate.cumtrapz(ss_precision, ss_recall)[-1]
+        print('KI LFC AUPR: ', ss_aupr)
+        ss_label = 'Train LFC ({:0.2f})'.format(ss_aupr)
+        plt.plot(ss_recall, ss_precision, lw=3, label=ss_label, color=Prism_10.mpl_colors[-4])
+
+        plt.plot([n_top / len(censored), n_top / len(censored)], [0, 1], '--', lw=3)
+        plt.xlim(0, 1)
+        plt.ylim(0, 1)
+        plt.legend(loc='best', handlelength=1)
+        plt.xlabel('Recall')
+        plt.ylabel('Precision')
+        plt.tight_layout()
+    if out_path:
+        plt.savefig(out_path, fmt='pdf')
+        plt.close()
+    else:
+        plt.show()
 
 
 def center_axis(axes: plt.Axes, which='y'):
@@ -650,14 +673,16 @@ def make_plots(dde, ts, net_data, sim_dea, matches, tx_to_gene):
 
     # Plot elbow rule
     top_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/sorting.pdf"
-    # plot_top_cut(censored, n_top, top_path)
+    plot_top_cut(censored, n_top, top_path)
 
     # Plot the moving median
     rs_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/running_stats.pdf"
     # plot_running_stat(unsorted, censored, ts, top, out_path=rs_path)
 
     # Precision recall plot
-    # pr_plot(unsorted, censored, test_sort)
+    pr_path ="/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/aupr.pdf"
+    plot_pr(censored, test_sort, n_top, pr_path)
+    sys.exit()
 
     # Plot the main paneled figure
     panel_plot(ts, top, censored, test_sort, matches, dde, tx_to_gene, sim_dea, net_data)
