@@ -1,4 +1,3 @@
-import sys
 from collections import Counter
 from collections import OrderedDict
 from typing import Union
@@ -200,11 +199,11 @@ def load_sim_data(path, node='y', perturb: Union[int, tuple, None]=1):
     return sim_data
 
 
-def plot_error_predictor(x, y, out_path=None, ax=None):
+def plot_error_predictor(x, y, c='KI', out_path=None, ax=None):
     print(stats.spearmanr(x, y))
     with sns.axes_style("whitegrid"):
         ax = sns.regplot(x, y, ax=ax)
-    ax.set_xlabel('log2(Mean KI-WT LFC)')
+    ax.set_xlabel('log2(Mean {}-WT LFC)'.format(c))
     ax.set_ylabel('∆MSE')
     plt.tight_layout()
     if out_path:
@@ -242,7 +241,7 @@ def plot_top_cut(df, n_top, out_path=None):
         plt.plot([n_top, n_top], [0, max_val], '--', label='cutoff')
         plt.xlim(0, len(df))
         plt.ylim(0, max_val)
-        plt.xlabel('Gene Prediction Rank')
+        plt.xlabel('Ranked Gene Prediction')
         plt.ylabel(r'Mean Absolute LFC($\frac{KO}{WT}$)')
         plt.tight_layout()
     if out_path:
@@ -662,14 +661,44 @@ def panel_plot(ts, top, censored, test_sort, matches, dde, tx_to_gene, sim_dea, 
                 fmt='pdf')
 
 
+def plot_null_lfc_distribution(sim_dea, out_path=None):
+    null_data = sim_dea.results['ko-wt'].coefficients.stack().reset_index()
+    null_data.columns = ['net', 'contrast', 'lfc']
+    plt.figure(figsize=(8, 7))
+    with sns.axes_style("whitegrid"):
+        ax = sns.violinplot(x='contrast', y='lfc', data=null_data, color='0.5')
+    ax.set_xticklabels(sim_dea.times)
+    ax.set_xlabel('Time')
+    ax.set_ylabel('LFC')
+    ax.set_title('Null model LFC distribution')
+    plt.tight_layout()
+    if out_path:
+        plt.savefig(out_path, fmt='pdf')
+        plt.close()
+    else:
+        plt.show()
+
+
 def make_plots(dde, ts, net_data, sim_dea, matches, tx_to_gene):
     # Get the groups necessary for plots
     ts, censored, n_top, test_sort = calc_groups(ts)
     top = censored.iloc[:n_top]
 
+    null_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/null_lfc.pdf"
+    plot_null_lfc_distribution(sim_dea, out_path=null_path)
+
     # Plot relationship between KI-WT LFC deviation and prediction
     fig_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/absdev_vs_diff.pdf"
-    # plot_error_predictor(np.log2(ts.abs_dev), ts.grouped_diff, fig_path)
+    print("KI vs error")
+    plot_error_predictor(np.log2(censored.abs_dev), censored.grouped_diff, out_path=fig_path)
+
+    print("KI vs KO")
+    fig_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/absdev_vs_meanlfcdev.pdf"
+    plot_error_predictor(np.log2(censored.abs_dev), np.log2(censored.mean_abs_lfc), out_path=fig_path)
+
+    print("KO vs error")
+    fig_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/meanlfcdev_vs_diff.pdf"
+    plot_error_predictor(np.log2(censored.mean_abs_lfc), censored.grouped_diff,  c='KO', out_path=fig_path)
 
     # Plot elbow rule
     top_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/sorting.pdf"
@@ -682,7 +711,6 @@ def make_plots(dde, ts, net_data, sim_dea, matches, tx_to_gene):
     # Precision recall plot
     pr_path ="/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/aupr.pdf"
     plot_pr(censored, test_sort, n_top, pr_path)
-    sys.exit()
 
     # Plot the main paneled figure
     panel_plot(ts, top, censored, test_sort, matches, dde, tx_to_gene, sim_dea, net_data)
