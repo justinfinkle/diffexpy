@@ -12,9 +12,8 @@ import seaborn as sns
 from cycler import cycler
 from matplotlib.lines import Line2D
 from matplotlib.path import Path
-from scipy import stats
-
 from pydiffexp import DEAnalysis
+from scipy import stats
 
 sns.set_style("white")
 
@@ -230,7 +229,12 @@ class DEPlot(object):
         # Get plotting statistics. Rows are: group, mean, SE, and Tstat
         #todo: Use groupby more appropriately to get stats
         g_stats = grouped.agg(['mean', 'median', 'sem'])
-        g_stats.columns = g_stats.columns.droplevel()
+        if g_stats.shape[1] > 3:
+            g_stats = g_stats.loc[:, gene].copy()
+        try:
+            g_stats.columns = g_stats.columns.droplevel()
+        except AttributeError:
+            pass
         g_stats['tstat'] = grouped.apply(self.grouped_tstat, ci)
         return g_stats
 

@@ -13,13 +13,12 @@ from matplotlib.patches import FancyArrowPatch, ArrowStyle
 from matplotlib.ticker import FormatStrFormatter
 from matplotlib.transforms import Affine2D
 from palettable.cartocolors.qualitative import Bold_8, Prism_10
-from scipy import integrate, stats
-from sklearn.utils import shuffle
-
 from pydiffexp import DEPlot
 from pydiffexp.pipeline import DynamicDifferentialExpression as DDE
 from pydiffexp.plot import elbow_criteria
 from pydiffexp.utils import multiindex_helpers as mi
+from scipy import integrate, stats
+from sklearn.utils import shuffle
 
 # Set defaults
 mpl.rcParams['axes.labelweight'] = 'bold'
@@ -656,9 +655,9 @@ def panel_plot(ts, top, censored, test_sort, matches, dde, tx_to_gene, sim_dea, 
     # Adjust axes
     plt.subplots_adjust(left=0.055, right=0.90, top=0.95, bottom=0.05)
     # plt.tight_layout(w_pad=10)
-    # plt.show()
-    plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_5/5_model_predictions.pdf",
-                fmt='pdf')
+    plt.show()
+    # plt.savefig("/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/Figure_5/5_model_predictions.pdf",
+    #             fmt='pdf')
 
 
 def plot_null_lfc_distribution(sim_dea, out_path=None):
@@ -684,33 +683,33 @@ def make_plots(dde, ts, net_data, sim_dea, matches, tx_to_gene):
     ts, censored, n_top, test_sort = calc_groups(ts)
     top = censored.iloc[:n_top]
 
-    null_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/null_lfc.pdf"
-    plot_null_lfc_distribution(sim_dea, out_path=null_path)
+    # null_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_DiffExPy/figures/SI_figures/null_lfc.pdf"
+    # plot_null_lfc_distribution(sim_dea, out_path=null_path)
+    #
+    # # Plot relationship between KI-WT LFC deviation and prediction
+    # fig_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_DiffExPy/figures/SI_figures/absdev_vs_diff.pdf"
+    # print("KI vs error")
+    # plot_error_predictor(np.log2(censored.abs_dev), censored.grouped_diff, out_path=fig_path)
+    #
+    # print("KI vs KO")
+    # fig_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_DiffExPy/figures/SI_figures/absdev_vs_meanlfcdev.pdf"
+    # plot_error_predictor(np.log2(censored.abs_dev), np.log2(censored.mean_abs_lfc), out_path=fig_path)
+    #
+    # print("KO vs error")
+    # fig_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_DiffExPy/figures/SI_figures/meanlfcdev_vs_diff.pdf"
+    # plot_error_predictor(np.log2(censored.mean_abs_lfc), censored.grouped_diff,  c='KO', out_path=fig_path)
+    #
+    # # Plot elbow rule
+    # top_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_DiffExPy/figures/SI_figures/sorting.pdf"
+    # plot_top_cut(censored, n_top, top_path)
 
-    # Plot relationship between KI-WT LFC deviation and prediction
-    fig_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/absdev_vs_diff.pdf"
-    print("KI vs error")
-    plot_error_predictor(np.log2(censored.abs_dev), censored.grouped_diff, out_path=fig_path)
-
-    print("KI vs KO")
-    fig_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/absdev_vs_meanlfcdev.pdf"
-    plot_error_predictor(np.log2(censored.abs_dev), np.log2(censored.mean_abs_lfc), out_path=fig_path)
-
-    print("KO vs error")
-    fig_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/meanlfcdev_vs_diff.pdf"
-    plot_error_predictor(np.log2(censored.mean_abs_lfc), censored.grouped_diff,  c='KO', out_path=fig_path)
-
-    # Plot elbow rule
-    top_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/sorting.pdf"
-    plot_top_cut(censored, n_top, top_path)
-
-    # Plot the moving median
-    rs_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/running_stats.pdf"
-    # plot_running_stat(unsorted, censored, ts, top, out_path=rs_path)
-
-    # Precision recall plot
-    pr_path ="/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_pydiffexp/figures/SI_figures/aupr.pdf"
-    plot_pr(censored, test_sort, n_top, pr_path)
+    # # Plot the moving median
+    # rs_path = "/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_DiffExPy/figures/SI_figures/running_stats.pdf"
+    # # plot_running_stat(unsorted, censored, ts, top, out_path=rs_path)
+    #
+    # # Precision recall plot
+    # pr_path ="/Users/jfinkle/Box Sync/*MODYLS_Shared/Publications/2018_DiffExPy/figures/SI_figures/aupr.pdf"
+    # plot_pr(censored, test_sort, n_top, pr_path)
 
     # Plot the main paneled figure
     panel_plot(ts, top, censored, test_sort, matches, dde, tx_to_gene, sim_dea, net_data)
