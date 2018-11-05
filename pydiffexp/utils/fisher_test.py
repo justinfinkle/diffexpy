@@ -76,19 +76,22 @@ def tf_to_gene_dict(gene_list, gene_to_tf_dict):
     # Initialize dictionary with TFs as keys
     tf_dict = {tf: None for tf in tf_set}
 
-    # For each TF
-    for tf in tf_dict.keys():
+    # Precompute what TF is in what gene for faster lookup
+    tfs_in_gene = {}
+    for gene in gene_list:
+        try:
+            tfs = set(gene_to_tf_dict[gene])
+        except KeyError:
+            continue
 
-        # Add the gene to the set if the TF is a associated with it
-        tf_match = []
-        for gene in gene_list:
-            try:
-                if tf in gene_to_tf_dict[gene]:
-                    tf_match.append(gene)
-            except KeyError:
-                pass
-        tf_dict[tf] = set(tf_match)
+        tfs_in_gene[gene] = tfs
+
+    for tf in tf_dict:
+        # Create a set of genes that are associated with the given TF
+        tf_dict[tf] = set(gene for gene, tfs in tfs_in_gene.items() if tf in tfs)
+
     return tf_dict
+
 
 def calc_frac(x, split_str='/'):
     splits = np.array([np.array(s.split(split_str), dtype=float) for s in x])
