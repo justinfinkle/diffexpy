@@ -350,10 +350,11 @@ class DEPlot(object):
         return ax
 
     def heatmap(self, df, hash_df, hm_ax=None, hash_ax=None, **kwargs):
-        cmap = sns.diverging_palette(30, 260, s=80, l=55, as_cmap=True)
+        if 'cmap' not in kwargs.keys():
+            kwargs.update('cmap', sns.diverging_palette(30, 260, s=80, l=55, as_cmap=True))
 
         # The specifiers for the axes
-        hm_ax = sns.heatmap(df, cmap=cmap, ax=hm_ax, cbar=True, **kwargs)
+        hm_ax = sns.heatmap(df, ax=hm_ax, cbar=True, **kwargs)
         hm_ax.set_xticklabels(hm_ax.get_xticklabels(), rotation=90)
 
         # Make hashes
