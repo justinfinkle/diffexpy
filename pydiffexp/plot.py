@@ -12,7 +12,9 @@ import seaborn as sns
 from cycler import cycler
 from matplotlib.lines import Line2D
 from matplotlib.path import Path
+from palettable.cartocolors.qualitative import Prism_10
 from pydiffexp import DEAnalysis
+from pydiffexp.utils import all_subsets
 from scipy import stats
 
 sns.set_style("white")
@@ -151,7 +153,12 @@ class DEPlot(object):
         self.dea = dea                              # type: DEAnalysis
 
     def volcano_plot(self, df: pd.DataFrame, p_value: float = 0.05, fc=2, x_colname='logFC', y_colname='-log10p',
-                     cutoff_lines=True, top_n=None, top_by='-log10p', show_labels=False, legend=True, **kwargs):
+                     cutoff_lines=True, top_n=None, top_by=('-log10p',), show_labels=False, legend=True, scatter_kwargs=None,
+                     **kwargs):
+        # Default scatter kwargs
+        scatter_default = {'s':60}
+        if scatter_kwargs:
+            scatter_default.update(scatter_kwargs)
 
         # Get rid of NaN data
         df = df.dropna()
@@ -172,28 +179,71 @@ class DEPlot(object):
 
         # Split top data points if requested
         if top_n:
-            # Find points to highlight
-            sort = set()
-            if isinstance(top_by, list):
-                for col in top_by:
-                    sort = sort.union(set(sig.index[np.argsort(np.abs(sig[col]))[::-1]][:top_n].values))
-            elif isinstance(top_by, str):
-                sort = sort.union(set(sig.index[np.argsort(np.abs(sig[top_by]))[::-1]][:top_n].values))
-            else:
-                raise ValueError('top_by must be a string or list of values found in the DataFrame used for the plot')
+            # Get sort subsets
+            subsets = [set(df[s].abs().sort_values(ascending=False).index[:top_n]) for s in top_by]
+            sets_df, sets_dict = all_subsets(subsets, labels=top_by)
 
-            top_sig = sig.loc[sort]
-            sig = sig.drop(sort)
-            ax.plot(top_sig[x_colname], top_sig[y_colname], 'o', c=_colors[0], ms=10, zorder=2, label='Top Genes')
+            # All highlighted
+            highlight = set().union(*sets_dict.values())
 
-            if show_labels:
-                fs = mpl.rcParams['legend.fontsize']
-                for row in top_sig.iterrows():
-                    ax.annotate(row[0], xy=(row[1][x_colname], row[1][y_colname]), fontsize=fs, style='italic')
+            # Get sig genes
+            sig_genes = df[(df['logFC'].abs() > log2_fc) & (df['-log10p'] > log10_pval)].index
+            sig_plot_genes = sig_genes.difference(highlight)
+            sets_dict['DEG'] = sig_plot_genes
 
-        # Make plot
-        ax.plot(sig[x_colname], sig[y_colname], 'o', c=_colors[2], ms=10, zorder=1, label='Diff Exp')
-        ax.plot(insig[x_colname], insig[y_colname], 'o', c=_colors[-1], ms=10, zorder=0, mew=0, label='')
+            #All genes
+            insig_genes = set(df.index).difference(sig_genes)
+            sets_dict['Not DEG'] = insig_genes
+
+            # Set colors
+            colors = Prism_10.mpl_colors
+            color_dict={'logFC': colors[1], '-log10p':colors[-3]}
+            for label, gene_set in sets_dict.items():
+                plot_df = df.loc[gene_set]
+                if label == 'DEG':
+                    color = '0.25'
+                elif label == 'Not DEG':
+                    color = '0.75'
+                else:
+                    # Highlighted genes that should be labeled
+                    if show_labels:
+                        fs = mpl.rcParams['legend.fontsize']
+                        for row in plot_df.iterrows():
+                            ax.annotate(row[0], xy=(row[1][x_colname], row[1][y_colname]), fontsize=fs, style='italic')
+
+                    if '∩' in label:
+                        color = Prism_10.mpl_colors[-1]
+                    else:
+                        color = color_dict[label]
+                # Color is supplied as a list because if there are 3 items in a group then it will split the RGB tuple
+                # causing unexpected behavior
+                scatter_default.update({'c': [color], 'label':label})
+                ax.scatter(plot_df['logFC'], plot_df['-log10p'], **scatter_default)
+
+
+
+        #     # Find points to highlight
+        #     sort = set()
+        #     if isinstance(top_by, list):
+        #         for col in top_by:
+        #             sort = sort.union(set(sig.index[np.argsort(np.abs(sig[col]))[::-1]][:top_n].values))
+        #     elif isinstance(top_by, str):
+        #         sort = sort.union(set(sig.index[np.argsort(np.abs(sig[top_by]))[::-1]][:top_n].values))
+        #     else:
+        #         raise ValueError('top_by must be a string or list of values found in the DataFrame used for the plot')
+        #
+        #     top_sig = sig.loc[sort]
+        #     sig = sig.drop(sort)
+        #     ax.plot(top_sig[x_colname], top_sig[y_colname], 'o', c=_colors[0], ms=10, zorder=2, label='Top Genes')
+        #
+        #     if show_labels:
+        #         fs = mpl.rcParams['legend.fontsize']
+        #         for row in top_sig.iterrows():
+        #             ax.annotate(row[0], xy=(row[1][x_colname], row[1][y_colname]), fontsize=fs, style='italic')
+        #
+        # # Make plot
+        # ax.plot(sig[x_colname], sig[y_colname], 'o', c=_colors[2], ms=10, zorder=1, label='Diff Exp')
+        # ax.plot(insig[x_colname], insig[y_colname], 'o', c=_colors[-1], ms=10, zorder=0, mew=0, label='')
 
         # Adjust axes
         ax.set_xlim([-max_x, max_x])
@@ -201,17 +251,17 @@ class DEPlot(object):
 
         # Add cutoff lines
         if cutoff_lines:
-            color = _colors[1]
+            color = '0.25'
             # P value line
 
-            ax.plot([-max_x, max_x], [log10_pval, log10_pval], '--', c=color, lw=3, label='Threshold')
+            ax.plot([-max_x, max_x], [log10_pval, log10_pval], '--', c=color, lw=3)
 
             # log fold change lines
             ax.plot([-log2_fc, -log2_fc], [0, max_y], '--', c=color, lw=3)
             ax.plot([log2_fc, log2_fc], [0, max_y], '--', c=color, lw=3)
 
         if legend:
-            ax.legend(loc='best', numpoints=1)
+            ax.legend(loc='best', numpoints=1, ncol=2)
 
         # Adjust labels
         ax.tick_params(axis='both', which='major')
