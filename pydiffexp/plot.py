@@ -374,7 +374,8 @@ class DEPlot(object):
         gene = df.name
         supers = sorted(list(set(df.index.get_level_values(supergroup))))
         if not ax:
-            fig, ax = plt.subplots(figsize=(8, 6))
+            with sns.axes_style('whitegrid', {'grid.color': 'k', 'axes.edgecolor': 'k'}):
+                fig, ax = plt.subplots(figsize=(8, 6))
         ax.set_prop_cycle(cycler('color', _colors))
         for sup in supers:
             sup_data = df.loc[sup]
@@ -390,7 +391,12 @@ class DEPlot(object):
 
             self.add_ts(ax, sup_data, sup, subgroup=subgroup,
                         **kwargs)
-        # ax.set_xlim([np.min(grouped_stats[0]), np.max(grouped_stats[0])])\
+
+        # Set xlims
+        xvals = df.index.get_level_values('time')
+        ax.set_xlim(xvals.min(), xvals.max())
+        ax.set_xticks(sorted(list(set(xvals))))
+
         if legend:
             ax.legend(loc='best', numpoints=1)
         # ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda x, p: '{:,.0f}'.format(x)))
